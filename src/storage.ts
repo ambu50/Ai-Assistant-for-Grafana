@@ -1,6 +1,6 @@
 import type { DatasourceContext } from './datasourceContext';
 import type { DashboardContext } from './dashboardContext';
-import { ChatMessage, ThinkingEffort } from './agent';
+import type { ChatMessage, ThinkingEffort } from './agent';
 
 export interface SavedConversation {
   id: string;
@@ -18,6 +18,12 @@ export interface SavedConversation {
 export const STORAGE_KEY = 'ai_assistant_conversations_v1';
 export const ACTIVE_KEY = 'ai_assistant_active_id_v1';
 const MAX_SAVED = 30;
+let storageIdentity: string | undefined;
+export function setStorageIdentity(userId: unknown, orgId: unknown): void {
+  const user = Number(userId), org = Number(orgId);
+  storageIdentity = Number.isSafeInteger(user) && user > 0 && Number.isSafeInteger(org) && org > 0 ? `${org}:${user}` : undefined;
+}
+function key(base: string): string { return `${base}:${storageIdentity}`; }
 
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -34,12 +40,12 @@ export function deriveTitle(messages: ChatMessage[]): string {
 
 export function loadSavedState(): { conversations: SavedConversation[]; activeId: string } {
   try {
-    if (typeof localStorage === 'undefined') {
+    if (typeof localStorage === 'undefined' || !storageIdentity) {
       const fresh = generateId();
       return { conversations: [], activeId: fresh };
     }
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const savedActive = localStorage.getItem(ACTIVE_KEY) || '';
+    const raw = localStorage.getItem(key(STORAGE_KEY));
+    const savedActive = localStorage.getItem(key(ACTIVE_KEY)) || '';
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -58,15 +64,15 @@ export function loadSavedState(): { conversations: SavedConversation[]; activeId
 
 export function persistSavedState(conversations: SavedConversation[], activeId: string): void {
   try {
-    if (typeof localStorage === 'undefined') {
+    if (typeof localStorage === 'undefined' || !storageIdentity) {
       return;
     }
     let list = conversations.slice(0, MAX_SAVED);
     let attempts = 0;
     while (attempts < 5) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-        localStorage.setItem(ACTIVE_KEY, activeId);
+        localStorage.setItem(key(STORAGE_KEY), JSON.stringify(list));
+        localStorage.setItem(key(ACTIVE_KEY), activeId);
         return;
       } catch (err) {
         if (list.length > 1) {

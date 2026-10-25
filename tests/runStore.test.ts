@@ -2,9 +2,10 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => ({ run: vi.fn() }));
 vi.mock('../src/agent', () => ({ runAgent: mock.run }));
 import { beginRun, getRun, endRunIfIdle } from '../src/runStore';
-import { loadSavedState } from '../src/storage';
+import { loadSavedState, setStorageIdentity } from '../src/storage';
 import { PlanExecution } from '../src/planning';
 beforeEach(() => {
+  setStorageIdentity(1, 1);
   vi.resetAllMocks(); endRunIfIdle();
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v) });

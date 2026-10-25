@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { deriveTitle, generateId, loadSavedState, persistSavedState, SavedConversation, STORAGE_KEY, ACTIVE_KEY } from '../src/storage';
+import { deriveTitle, generateId, loadSavedState, persistSavedState, SavedConversation, STORAGE_KEY, ACTIVE_KEY, setStorageIdentity } from '../src/storage';
 
 class LocalStorageMock {
   private store: Record<string, string> = {};
@@ -11,6 +11,7 @@ class LocalStorageMock {
 
 describe('storage module', () => {
   beforeEach(() => {
+    setStorageIdentity(1, 1);
     // @ts-expect-error mock
     globalThis.localStorage = new LocalStorageMock();
   });
@@ -55,10 +56,21 @@ describe('storage module', () => {
   });
 
   it('falls back gracefully on malformed JSON', () => {
-    localStorage.setItem(STORAGE_KEY, '{invalid-json');
-    localStorage.setItem(ACTIVE_KEY, 'some-id');
+    localStorage.setItem(STORAGE_KEY + ':1:1', '{invalid-json');
+    localStorage.setItem(ACTIVE_KEY + ':1:1', 'some-id');
     const state = loadSavedState();
     expect(state.conversations).toEqual([]);
     expect(state.activeId).toBeTruthy();
   });
+});
+
+it('isolates conversations by user and organization and never loads the legacy shared keys', () => {
+  const data = new Map<string, string>();
+  globalThis.localStorage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } } as Storage;
+  setStorageIdentity(1, 1);
+  persistSavedState([{ id: 'admin', title: 'Private', messages: [], context: '', range: '', createdAt: 1, updatedAt: 1 }], 'admin');
+  setStorageIdentity(2, 1); expect(loadSavedState().conversations).toEqual([]);
+  setStorageIdentity(1, 2); expect(loadSavedState().conversations).toEqual([]);
+  setStorageIdentity(1, 1); expect(loadSavedState().conversations[0].id).toBe('admin');
+  setStorageIdentity(undefined, undefined); expect(loadSavedState().conversations).toEqual([]);
 });

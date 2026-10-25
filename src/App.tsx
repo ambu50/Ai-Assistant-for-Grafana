@@ -165,7 +165,7 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
           </div>)}
         </div>
       </div>}
-      <div className="ai-sidebottom"><span className="ai-label">POWERED BY</span><p>Grafana LLM + MCP</p><small>Conversations stay preserved in local browser storage. Prompts and tool results are sent to your configured provider.</small><a href={`${config.appSubUrl}/plugins/grafana-llm-app`}>Configure connection ↗</a></div>
+      <div className="ai-sidebottom"><span className="ai-label">POWERED BY</span><p>Grafana LLM + Grafana API</p><small>Conversations stay preserved in local browser storage. Tools run with your Grafana permissions. Prompts and tool results are sent to your configured provider.</small><a href={`${config.appSubUrl}/plugins/grafana-llm-app`}>Configure connection ↗</a></div>
     </aside>
     <main className="ai-main">
       <header><h2>Assistant <span className="ai-beta" title="Loaded plugin version">v{pluginMetadata.info.version}</span></h2></header>

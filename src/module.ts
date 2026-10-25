@@ -1,7 +1,9 @@
+import { setStorageIdentity } from './storage';
 import { AppPlugin, PluginExtensionPoints, type PluginExtensionPanelContext, type PluginExtensionEventHelpers } from '@grafana/data';
 import { config, locationService } from '@grafana/runtime';
 import React, { lazy, Suspense } from 'react';
 import { contextFromLocation, contextFromPanel, type DashboardContext } from './dashboardContext';
+setStorageIdentity(config.bootData?.user?.id, config.bootData?.user?.orgId);
 declare let __webpack_public_path__: string;
 __webpack_public_path__ = `${config.appSubUrl}/public/plugins/ai-assistant-app/`;
 const App = lazy(() => import('./App').then(module => ({ default: module.App })).catch(error => {

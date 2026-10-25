@@ -11,7 +11,7 @@ Show a short, actionable plan for complex requests, execute it immediately, and 
 ## Provider independence
 
 - Use `grafana-llm-app` for provider selection, endpoints, credentials, and model configuration. Do not embed deployment hostnames, model names, or provider-specific defaults.
-- Plan from task requirements and tools actually advertised by MCP. Do not assume particular datasource types, clusters, or installations.
+- Plan from task requirements and supported session-authenticated tools. Do not assume particular datasource types, clusters, or installations.
 - Treat streaming, reasoning hints, and structured-output modes as optional capabilities. Use only capability information exposed by the integration; when unknown, use the portable baseline and show unavailable options clearly. Avoid automatically replaying writes when changing request modes.
 - Show neutral progress for all providers: current step, elapsed time, actual tool results, and errors. Latency does not establish whether a backend is actively generating.
 - Validate with hosted and local provider response fixtures, including slow responses, absent optional fields, malformed plans, unsupported capabilities, and upstream failures. Record separately which provider configurations were tested live; local inference is one scenario, not an architectural assumption.
@@ -67,7 +67,7 @@ Acceptance: a dashboard task shows and executes its plan without approval pauses
 - After saving, read back the dashboard and compare the actual panels, datasource references, and expressions against the task requirements. Report runtime data validation separately from structural verification.
 - Repair specific mismatches and verify again. Show repeated failures as unresolved rather than marking the step complete or inventing success. Keep repair attempts visible and cancellable without adding a global iteration cap.
 
-Acceptance: failed MCP results never produce success states; wrong datasource references are detected; empty query results are accurately reported; saving a dashboard alone does not complete its verification step.
+Acceptance: failed tool results never produce success states; wrong datasource references are detected; empty query results are accurately reported; saving a dashboard alone does not complete its verification step.
 
 ## Phase 4 — Provider-independent reliability
 

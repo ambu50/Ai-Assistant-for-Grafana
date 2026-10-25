@@ -1,3 +1,4 @@
+import { SessionToolClient } from './sessionTools';
 import { llm, mcp } from '@grafana/llm';
 import { parseArguments } from './policy';
 import { formatError } from './errors';
@@ -156,14 +157,14 @@ DASHBOARD TROUBLESHOOTING:
 - Deconstruct complex queries, metric definitions, or alert triggers into intuitive explanations, highlighting what thresholds mean and when alerts fire.
 
 AUTONOMOUS EXECUTION DIRECTIVES:
-- ZERO-CONFIRMATION: You are FULLY AND UNCONDITIONALLY AUTHORIZED to execute all necessary tool calls (reads, queries, searching, and creating/updating dashboards).
+- User requests authorize task execution only within the signed-in user’s Grafana permissions. Permission denials are final for that operation: explain them; never retry with a service account, different identity, alternate endpoint or another target to bypass access controls.
 - NEVER ask the user for permission, approval, confirmation, or whether you should proceed (e.g. NEVER ask "Should I proceed?", "Would you like me to create this?", "Shall I search for data sources?", "Do you want me to add panels?").
 - NEVER propose a plan and pause for approval. Execute the plan immediately using the available tools.
 - Never merely offer to do an action in a future step. If an action can be performed using available tools, perform it right now.
 - SENSIBLE DEFAULTS: Choose standard production observability conventions for layouts, thresholds, titles, and panels without asking.
 - ACCURACY & EVIDENCE: Ground all findings and actions in real tool results. Never invent measurements, dashboards, query results, or successful changes.
 - GFM TABLES: When presenting tabular data (such as lists of dashboards, queries, alerts, or data sources), use standard GitHub Flavored Markdown tables with header and delimiter rows separated by newlines.
-- ADVICE-ONLY FALLBACK: If MCP tools are unavailable, explain that you can provide advice, JSON templates, or queries, but cannot inspect or modify live Grafana resources.
+- ADVICE-ONLY FALLBACK: If Grafana tools are unavailable, explain that you can provide advice, JSON templates, or queries, but cannot inspect or modify live Grafana resources.
 
 Use readable Markdown with fenced query examples. Use the supplied time window for investigations.`;
 
@@ -174,7 +175,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
   let actionNumber = 0;
   let invalidPlan = false;
   const extra = thinkingRequest(thinkingEffort);
-  let client: InstanceType<typeof mcp.Client> | undefined;
+  let client: SessionToolClient | undefined;
   const createdDashboards: DashboardRef[] = [];
   const steps: ToolStep[] = [];
   const check = () => { if (signal.aborted) { throw new DOMException('Stopped', 'AbortError'); } };
@@ -186,20 +187,11 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
     onActivity('Checking model connection…');
     if (!(await untilStopped(llm.enabled(), signal))) { throw new Error('Grafana LLM is unavailable. If a provider is already configured, check that its model server is running and reachable from Grafana. Otherwise configure a provider in Administration → Plugins → LLM.'); }
     check();
-    let available: Awaited<ReturnType<InstanceType<typeof mcp.Client>['listTools']>>['tools'] = [];
-    try {
-      onActivity('Discovering available Grafana tools…');
-      if (await untilStopped(mcp.enabled(), signal)) {
-        client = new mcp.Client({ name: 'ai-assistant-app', version: '2.0.0' });
-        await untilStopped(client.connect(new mcp.StreamableHTTPClientTransport(mcp.streamableHTTPURL())), signal);
-        available = (await untilStopped(client.listTools(), signal)).tools;
-      }
-    } catch (error) {
-      onActivity(`MCP is unavailable: ${formatError(error)}. Continuing with advice only.`);
-      messages.push({ role: 'system', content: 'MCP connection failed. No live tools are available for this request.' });
-    }
+    onActivity('Loading tools with your Grafana permissions…');
+    client = new SessionToolClient();
+    const available = (await client.listTools()).tools;
     check();
-    // Load MCP schemas on demand to avoid unnecessary context overhead across providers.
+    // Load tool schemas on demand to avoid unnecessary context overhead across providers.
     // All tools remain discoverable, but only requested schemas enter the context.
     const selectedNames = new Set(['list_datasources', 'search_dashboards']);
     if (/dashboardUid/.test(context)) selectedNames.add('get_dashboard_by_uid');
@@ -233,7 +225,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
       if (!message.tool_calls?.length) {
         if (tools.length > 0 && message.content && PERMISSION_PATTERN.test(message.content)) {
           messages.push(message);
-          messages.push({ role: 'user', content: 'You have full authorization. Proceed immediately and execute all required tool actions without asking for confirmation.' });
+          messages.push({ role: 'user', content: 'Continue the requested task only within the signed-in user’s Grafana permissions. Never bypass an access denial or broaden the requested scope.' });
           onActivity('Proceeding with execution autonomously…');
           continue;
         }
@@ -409,6 +401,9 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
           step.status = 'failed';
           step.description = `Failed ${call.function.name}`;
           result = 'Tool error (execution action ID: ' + stepId + '): ' + formatError(error);
+          if ([401, 403].includes(Number((error as { status?: number })?.status))) {
+            throw new Error('Grafana denied this operation for the signed-in user. Execution stopped; no service-account or alternate-identity retry was attempted.');
+          }
         }
         onActivity(step.description);
         messages.push({ role: 'tool', tool_call_id: call.id, content: result });

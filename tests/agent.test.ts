@@ -6,6 +6,7 @@ vi.mock('@grafana/llm', () => ({
     StreamableHTTPClientTransport: class {}, convertToolsToOpenAI: (tools: unknown) => tools,
     Client: class { connect = vi.fn().mockResolvedValue(undefined); listTools = mocks.list; callTool = mocks.call; close = mocks.close; } },
 }));
+vi.mock('../src/sessionTools', () => ({ SessionToolClient: class { listTools = mocks.list; callTool = mocks.call; close = mocks.close; } }));
 import { extractDashboardInfo, extractDashboardRefsFromText, normalizeMarkdownTables, runAgent, thinkingRequest } from '../src/agent';
 const answer = { choices: [{ message: { role: 'assistant', content: 'Done' } }] };
 const tool = (name: string) => ({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: '1', type: 'function', function: { name, arguments: JSON.stringify(name === 'update_dashboard' ? { dashboard: { uid: 'test', title: 'New Dashboard', panels: [] } } : { uid: 'test' }) } }] } }] });
@@ -75,10 +76,11 @@ describe('investigation agent', () => {
     await expect(runAgent([], '', controller.signal, vi.fn(), vi.fn())).rejects.toThrow('Stopped');
     expect(mocks.call).not.toHaveBeenCalled(); expect(mocks.close).toHaveBeenCalled();
   });
-  it('runs advice-only when MCP is disabled', async () => {
+  it('uses native session tools without consulting the privileged MCP endpoint', async () => {
     mocks.mcpEnabled.mockResolvedValue(false); mocks.chat.mockResolvedValue(answer);
     await runAgent([], '', new AbortController().signal, vi.fn(), vi.fn());
-    expect(mocks.chat.mock.calls[0][0]).not.toHaveProperty('tools');
+    expect(mocks.chat.mock.calls[0][0]).toHaveProperty('tools');
+    expect(mocks.mcpEnabled).not.toHaveBeenCalled();
   });
   it('continues beyond eight rounds until the task completes', async () => {
     for (let i = 0; i < 12; i++) { mocks.chat.mockResolvedValueOnce(tool('search_dashboards')); }
@@ -276,4 +278,12 @@ it('verifies partial dashboard patches against the refreshed pre-write state wit
   expect(mocks.call.mock.calls.filter(call => call[0].name === 'update_dashboard')).toHaveLength(1);
   expect(progress.mock.calls.at(-1)![0].dashboards[0].status).toBe('verified');
   expect(model.panels[0].options.content).toBe('Keep');
+});
+it('stops immediately on a native Grafana authorization denial without alternate tool retries', async () => {
+  mocks.call.mockRejectedValue({ status: 403, data: { message: 'Access denied' } });
+  mocks.chat.mockResolvedValueOnce(tool('get_dashboard_by_uid')).mockResolvedValueOnce(tool('update_dashboard')).mockResolvedValueOnce(answer);
+  await expect(runAgent([{ role: 'user', content: 'Delete a panel from dashboard test' }], '', new AbortController().signal, vi.fn(), vi.fn())).rejects.toThrow('Grafana denied');
+  expect(mocks.call).toHaveBeenCalledTimes(1);
+  expect(mocks.chat).toHaveBeenCalledTimes(1);
+  expect(mocks.mcpEnabled).not.toHaveBeenCalled();
 });
