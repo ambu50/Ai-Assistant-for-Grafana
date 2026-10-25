@@ -8,7 +8,7 @@ import { applyDashboardPatch, dashboardModel, mergeDashboardEdit, preservedPanel
 
 export type DashboardRef = { uid: string; title?: string; url?: string };
 export type ToolStep = { id: string; name: string; status: 'running' | 'completed' | 'failed'; description: string };
-export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean };
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean; copyOffer?: { sourceUid: string; sourceTitle: string; request: string } };
 
 // Familiar reasoning control surfaced in the UI. To stay provider-agnostic, effort maps ONLY
 // to the standard, widely-supported `reasoning_effort` field. No provider-specific kwargs
@@ -157,6 +157,7 @@ DASHBOARD TROUBLESHOOTING:
 - Deconstruct complex queries, metric definitions, or alert triggers into intuitive explanations, highlighting what thresholds mean and when alerts fire.
 
 AUTONOMOUS EXECUTION DIRECTIVES:
+- After an edit is denied, offer a modified copy only if the source is readable. Wait for an explicit request to create that copy. Use create_dashboard_copy, preserve the original, and respect destination create permissions. Never interpret a denial alone as permission to create a new resource.
 - User requests authorize task execution only within the signed-in user’s Grafana permissions. Permission denials are final for that operation: explain them; never retry with a service account, different identity, alternate endpoint or another target to bypass access controls.
 - NEVER ask the user for permission, approval, confirmation, or whether you should proceed (e.g. NEVER ask "Should I proceed?", "Would you like me to create this?", "Shall I search for data sources?", "Do you want me to add panels?").
 - NEVER propose a plan and pause for approval. Execute the plan immediately using the available tools.
@@ -169,7 +170,7 @@ AUTONOMOUS EXECUTION DIRECTIVES:
 Use readable Markdown with fenced query examples. Use the supplied time window for investigations.`;
 
 export async function runAgent(history: ChatMessage[], context: string, signal: AbortSignal,
-  onText: (text: string, dashboards?: DashboardRef[], steps?: ToolStep[]) => void, onActivity: (text: string) => void,
+  onText: (text: string, dashboards?: DashboardRef[], steps?: ToolStep[], copyOffer?: ChatMessage['copyOffer']) => void, onActivity: (text: string) => void,
   thinkingEffort: ThinkingEffort = 'off', onProgress: (plan: TaskPlan) => void = () => {}) {
   const execution = new PlanExecution(onProgress);
   let actionNumber = 0;
@@ -318,6 +319,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
         try {
           if (!client || !available.some(t => t.name === call.function.name)) { throw new Error('Tool is unavailable.'); }
           const args = parseArguments(call.function.arguments);
+          if (call.function.name === 'create_dashboard_copy' && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) throw new Error('A modified copy must be explicitly requested by the user first.');
           check();
           onActivity('Running ' + call.function.name + '…');
           execution.beginAction(stepId, call.function.name);
@@ -369,6 +371,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
           const output = await untilStopped(client.callTool({ name: call.function.name, arguments: args }), signal);
           check();
           unwrapResult(output);
+          if (call.function.name === 'create_dashboard_copy') proposed = (output as { expectedDashboard?: unknown }).expectedDashboard;
           const query = queryEvidence(call.function.name, args, output, false);
           if (query) { query.actionId = stepId; query.stepId = execution.current()?.id; execution.state.queries.push(query); }
           const dashRef = extractDashboardInfo(call.function.name, args, output);
@@ -387,7 +390,8 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
             if (gaps.length) throw new Error('Dashboard saved, but verification failed: ' + gaps.join(' ') + ' Refetch the current dashboard and repair specific mismatches; do not repeat the original write blindly.');
             if (dashRef && !createdDashboards.some(d => d.uid === dashRef.uid)) createdDashboards.push(dashRef);
           }
-          result = JSON.stringify(output).slice(0, 24000);
+          const modelOutput = call.function.name === 'create_dashboard_copy' ? { ...(output as object), expectedDashboard: undefined } : output;
+          result = JSON.stringify(modelOutput).slice(0, 24000);
           step.status = 'completed';
           step.description = `Completed ${call.function.name}`;
           execution.endAction(stepId);
@@ -401,6 +405,22 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
           step.status = 'failed';
           step.description = `Failed ${call.function.name}`;
           result = 'Tool error (execution action ID: ' + stepId + '): ' + formatError(error);
+          if (Number((error as { status?: number })?.status) === 403 && call.function.name === 'update_dashboard') {
+            const denied = parseArguments(call.function.arguments);
+            if (typeof denied.dashboard === 'string') { try { denied.dashboard = JSON.parse(denied.dashboard); } catch { /* Invalid dashboard has no readable target. */ } }
+            const sourceUid = String((denied.dashboard as { uid?: string } | undefined)?.uid || denied.uid || '');
+            if (sourceUid) {
+              try {
+                const readable = dashboardModel(unwrapResult(await untilStopped(client!.callTool({ name: 'get_dashboard_by_uid', arguments: { uid: sourceUid } }), signal)));
+                check();
+                if (readable?.uid === sourceUid && typeof readable.title === 'string') {
+                  execution.interrupt('The original dashboard cannot be edited with your Grafana permissions.');
+                  onText(`You can view **${readable.title}**, but you do not have permission to edit it. Grafana blocked this edit to the original.\n\nI can create a separate copy with your requested changes if you have permission to create dashboards in the destination folder.`, undefined, steps, { sourceUid, sourceTitle: readable.title, request: lastPrompt });
+                  return;
+                }
+              } catch (readError) { check(); /* Never offer copies of unreadable resources. */ }
+            }
+          }
           if ([401, 403].includes(Number((error as { status?: number })?.status))) {
             throw new Error('Grafana denied this operation for the signed-in user. Execution stopped; no service-account or alternate-identity retry was attempted.');
           }

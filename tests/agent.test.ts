@@ -287,3 +287,26 @@ it('stops immediately on a native Grafana authorization denial without alternate
   expect(mocks.chat).toHaveBeenCalledTimes(1);
   expect(mocks.mcpEnabled).not.toHaveBeenCalled();
 });
+it('offers a copy after an edit denial only when the source remains readable, without automatically creating it', async () => {
+  mocks.chat.mockResolvedValueOnce(tool('update_dashboard'));
+  mocks.call.mockImplementation(async ({ name }) => {
+    if (name === 'get_dashboard_by_uid') return { dashboard: { uid: 'test', title: 'Protected dashboard', panels: [], version: 1 } };
+    throw { status: 403 };
+  });
+  const text = vi.fn();
+  await runAgent([{ role: 'user', content: 'Remove the CPU panel' }], '', new AbortController().signal, text, vi.fn());
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('do not have permission'), undefined, expect.any(Array), { sourceUid: 'test', sourceTitle: 'Protected dashboard', request: 'Remove the CPU panel' });
+  expect(mocks.call.mock.calls.filter(([call]) => call.name === 'update_dashboard')).toHaveLength(1);
+  expect(mocks.call.mock.calls.some(([call]) => call.name === 'create_dashboard_copy')).toBe(false);
+});
+it('verifies the new copy rather than the protected source after an explicit copy request', async () => {
+  mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }, { name: 'get_dashboard_by_uid' }] });
+  const expected = { id: null, uid: null, version: 0, title: 'Source (copy)', panels: [{ id: 2 }] };
+  mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: JSON.stringify({ sourceUid: 'source', operations: [{ op: 'remove', path: '/panels/0' }] }) } }] } }] }).mockResolvedValueOnce(answer);
+  mocks.call.mockImplementation(async ({ name }) => name === 'create_dashboard_copy' ? { uid: 'copied', title: 'Source (copy)', expectedDashboard: expected } : { dashboard: { ...expected, uid: 'copied', id: 20, version: 1 } });
+  const text = vi.fn();
+  await runAgent([{ role: 'user', content: 'Create a modified copy with create_dashboard_copy; remove the first panel.' }], '', new AbortController().signal, text, vi.fn());
+  expect(mocks.call).toHaveBeenCalledWith({ name: 'get_dashboard_by_uid', arguments: { uid: 'copied' } });
+  expect(text.mock.calls.at(-1)?.[1]).toContainEqual(expect.objectContaining({ uid: 'copied' }));
+  expect(mocks.call.mock.calls.some(([call]) => call.name === 'update_dashboard')).toBe(false);
+});

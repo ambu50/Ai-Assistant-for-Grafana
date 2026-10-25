@@ -73,3 +73,7 @@ Click **＋ Data source** below the message box, search by name or type, and cho
 ## Security
 
 See [SECURITY.md](SECURITY.md). Dashboard creation identity is not an ownership policy: Grafana dashboard/folder permissions determine who may edit. A user explicitly granted Edit may edit dashboards created by others. Restrict folder/dashboard ACLs for owner-only workflows. Releases before 2.1.0 must not be deployed for multiple users with the shared MCP service enabled.
+
+### Modified copies of read-only dashboards
+
+When Grafana denies an edit but still allows reading the source, the assistant offers **Create modified copy**. Nothing is copied until you choose that action or explicitly request a copy. The copy gets a new dashboard identity, keeps the source's other panels/settings, and applies your requested changes. It is saved with overwrite disabled and read back for verification. You must have Create permission in the destination folder; the action does not grant permissions or bypass Grafana ACLs. If no destination is specified, Grafana's default destination is used.

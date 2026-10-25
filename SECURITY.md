@@ -24,3 +24,7 @@ Local history is namespaced by Grafana user ID and organization ID. Unattributed
 Automated tests cover session endpoint routing, rejected/unknown tool dispatch, forged identity arguments, permission revocation between read and save, immediate termination after a 403, and history namespacing. A live local test confirms the non-admin test user has `canSave=false`, native dashboard save returns HTTP 403 with the dashboard version unchanged, and the shared MCP endpoint returns HTTP 404 after containment.
 
 These checks are not an independent security audit. Other Grafana plugins and endpoints require their own access-control review. Do not re-enable privileged shared MCP for untrusted users. Adding a tool requires a native user-scoped server endpoint and authorization tests before exposing its schema.
+
+## Modified copy fallback (2.2.0)
+
+A denied dashboard edit may produce a copy offer only if the source remains readable under the same user session. The offer is not an automatic retry or mutation. Selecting it creates an explicit new user request. `create_dashboard_copy` re-reads the source, applies requested patch operations to an independent clone, clears dashboard id/uid/version, and forces overwrite=false. The server authorizes creation in the destination folder; a Viewer without creation permission remains denied. Unreadable dashboards cannot be copied. Copies are read back using the same user identity before success is reported.

@@ -61,9 +61,9 @@ export function beginRun(opts: { conversationId: string; messages: ChatMessage[]
   // Save the user turn immediately so it survives even an unmount before the effect flushes.
   mergeMessages(conversationId, messages);
 
-  const onText = (content: string, dashboards?: DashboardRef[], steps?: ToolStep[]) => {
+  const onText = (content: string, dashboards?: DashboardRef[], steps?: ToolStep[], copyOffer?: ChatMessage['copyOffer']) => {
     if (controller?.signal !== signal) return;
-    mergeMessages(conversationId, [...messages, { role: 'assistant', content, dashboards, steps, plan: snapshot?.plan }]);
+    mergeMessages(conversationId, [...messages, { role: 'assistant', content, dashboards, steps, copyOffer, plan: snapshot?.plan }]);
     if (snapshot && snapshot.conversationId === conversationId) { snapshot = { ...snapshot, running: false }; }
     emit();
   };

@@ -179,7 +179,8 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
         {messages.filter(m => !(m.checkpoint && progress)).map((m, i) => <article key={i} className={`ai-message ${m.role}`}>
           <div className="ai-message-role">{m.role === 'assistant' ? '✦ AI Assistant' : 'You'}</div>
           {m.plan && <TaskChecklist plan={m.plan} />}
-          {m.plan && !busy && i === messages.length - 1 && m.plan.steps.some(step => step.status !== 'completed' && step.status !== 'skipped' && !step.resolvedBy) && <button type="button" className="ai-resume" onClick={() => send('Continue the unfinished task from the previous checkpoint. Inspect current resources before any mutations; preserve completed work and do not blindly repeat writes.')}>Continue unfinished task</button>}
+          {m.copyOffer && !busy && i === messages.length - 1 && <button type="button" className="ai-resume" onClick={() => send(`Create a separate modified copy of dashboard UID ${m.copyOffer!.sourceUid}. Keep the original unchanged. Apply this requested change to the copy: ${JSON.stringify(m.copyOffer!.request)}. Use create_dashboard_copy with a new identity and overwrite disabled; respect my destination creation permissions.`)}>Create modified copy</button>}
+          {m.plan && !m.copyOffer && !busy && i === messages.length - 1 && m.plan.steps.some(step => step.status !== 'completed' && step.status !== 'skipped' && !step.resolvedBy) && <button type="button" className="ai-resume" onClick={() => send('Continue the unfinished task from the previous checkpoint. Inspect current resources before any mutations; preserve completed work and do not blindly repeat writes.')}>Continue unfinished task</button>}
           {m.steps && m.steps.length > 0 && (
             <details className="ai-steps-details">
               <summary className="ai-steps-summary">

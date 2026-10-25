@@ -48,3 +48,20 @@ it('does not expose datasource credentials or connection details to the model', 
   api.get.mockResolvedValue([{ uid: 'p', name: 'Metrics', type: 'prometheus', url: 'private', basicAuthUser: 'secret', jsonData: { token: 'secret' } }]);
   await expect(client.callTool({ name: 'list_datasources', arguments: {} })).resolves.toEqual([{ uid: 'p', name: 'Metrics', type: 'prometheus' }]);
 });
+it('creates a modified copy with a fresh identity and overwrite disabled without saving the source', async () => {
+  const original = { id: 17, uid: 'source', version: 8, title: 'Original', panels: [{ id: 1 }, { id: 2 }], tags: ['ops'] };
+  api.get.mockResolvedValue({ dashboard: original, meta: { canSave: false } });
+  api.post.mockResolvedValue({ uid: 'new-copy', status: 'success' });
+  const result = await client.callTool({ name: 'create_dashboard_copy', arguments: { sourceUid: 'source', operations: [{ op: 'remove', path: '/panels/0' }], folderUid: 'personal', overwrite: true } });
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/dashboards/db', expect.objectContaining({ overwrite: false, folderUid: 'personal', dashboard: { id: null, uid: null, version: 0, title: 'Original (copy)', panels: [{ id: 2 }], tags: ['ops'] } }));
+  expect(original.panels).toHaveLength(2);
+  expect(result).toMatchObject({ uid: 'new-copy' });
+});
+it('cannot copy an unreadable dashboard or bypass destination creation permissions', async () => {
+  api.get.mockRejectedValueOnce({ status: 403 });
+  await expect(client.callTool({ name: 'create_dashboard_copy', arguments: { sourceUid: 'hidden' } })).rejects.toMatchObject({ status: 403 });
+  expect(api.post).not.toHaveBeenCalled();
+  api.get.mockResolvedValue({ dashboard: { uid: 'source', title: 'Original', panels: [] } });
+  api.post.mockRejectedValue({ status: 403 });
+  await expect(client.callTool({ name: 'create_dashboard_copy', arguments: { sourceUid: 'source' } })).rejects.toMatchObject({ status: 403 });
+});

@@ -10,6 +10,7 @@ export const sessionTools = [
   definition('list_datasources', 'List datasource identities accessible to the signed-in user.', {}),
   definition('get_datasource_by_uid', 'Read a datasource identity as the signed-in user.', { uid: string }, ['uid']),
   definition('update_dashboard', 'Create or update a classic dashboard, or apply patch operations to an existing dashboard. Grafana enforces the signed-in user permissions on the actual save. Preserve unrelated content.', { uid: string, dashboard: { type: 'object', additionalProperties: true }, operations: { type: 'array', items: { type: 'object', additionalProperties: true } }, folderUid: string, message: string, overwrite: { type: 'boolean' } }),
+  definition('create_dashboard_copy', 'Create a new modified copy of a readable dashboard only after the user explicitly requests a copy. Never edit or overwrite the source. Destination creation permissions are enforced by Grafana.', { sourceUid: string, title: string, operations: { type: 'array', items: { type: 'object', additionalProperties: true } }, folderUid: string }, ['sourceUid']),
   definition('query_prometheus', 'Run a PromQL query through Grafana as the signed-in user.', { ...source, expr: string, queryType: { type: 'string', enum: ['instant', 'range'] }, startTime: string, endTime: string, stepSeconds: { type: 'number' } }, ['datasourceUid', 'expr']),
   definition('list_prometheus_label_values', 'Read Prometheus label values using the signed-in user permissions.', { ...source, labelName: string }, ['datasourceUid', 'labelName']),
   definition('list_prometheus_label_names', 'Read Prometheus label names using the signed-in user permissions.', source, ['datasourceUid']),
@@ -41,6 +42,17 @@ export class SessionToolClient {
       case 'get_dashboard_by_uid': return api.get(`/api/dashboards/uid/${identifier(args.uid, 'dashboard UID')}`);
       case 'list_datasources': return (await api.get<any[]>('/api/datasources')).map(identity);
       case 'get_datasource_by_uid': return identity(await api.get(`/api/datasources/uid/${identifier(args.uid, 'datasource UID')}`));
+      case 'create_dashboard_copy': {
+        const sourceUid = identifier(args.sourceUid, 'source dashboard UID');
+        const original = await api.get(`/api/dashboards/uid/${sourceUid}`);
+        if (!original.dashboard || !Array.isArray(original.dashboard.panels)) throw new Error('No readable classic dashboard was returned.');
+        const dashboard = args.operations !== undefined ? applyDashboardPatch(original.dashboard, args.operations) : JSON.parse(JSON.stringify(original.dashboard));
+        dashboard.id = null; dashboard.uid = null; dashboard.version = 0;
+        dashboard.title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : `${original.dashboard.title} (copy)`;
+        const saved = await api.post('/api/dashboards/db', { dashboard, ...(args.folderUid !== undefined ? { folderUid: args.folderUid } : {}), overwrite: false, message: 'AI Assistant: create modified dashboard copy' });
+        if (!saved.uid || saved.uid === sourceUid) throw new Error('The server did not return a distinct copy UID.');
+        return { ...saved, title: dashboard.title, expectedDashboard: dashboard };
+      }
       case 'update_dashboard': {
         let dashboard: any = args.dashboard;
         let folderUid = args.folderUid;

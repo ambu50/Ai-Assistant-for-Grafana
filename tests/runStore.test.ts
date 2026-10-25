@@ -48,3 +48,10 @@ it('passes the selected datasource to the agent and persists it alongside dashbo
   expect(mock.run.mock.calls[0][1]).toBe(context);
   expect(loadSavedState().conversations[0]).toMatchObject({ datasource, viewContext: { dashboardUid: 'cluster' } });
 });
+it('persists the copy offer so its action survives reopening the conversation', async () => {
+  const copyOffer = { sourceUid: 'source', sourceTitle: 'Read-only', request: 'Remove panel 1' };
+  mock.run.mockImplementation(async (_h, _c, _s, onText) => onText('You can create a modified copy.', undefined, [], copyOffer));
+  beginRun({ conversationId: 'offer', messages: [{ role: 'user', content: 'Remove panel 1' }], context: '{}', effort: 'off' });
+  await vi.waitFor(() => expect(getRun()?.running).toBe(false));
+  expect(loadSavedState().conversations[0].messages.at(-1)?.copyOffer).toEqual(copyOffer);
+});
