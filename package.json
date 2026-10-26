@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant-app",
-  "version": "2.2.4",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",

@@ -1,6 +1,6 @@
 # Authorization boundary
 
-AI Assistant 2.2.4 uses `grafana-llm-app` for model completions only. It does not connect to the LLM plugin's MCP server. On local installations that server can execute with a shared service account rather than the requesting user's permissions. Releases before 2.1.0 must not be published as safe for multi-user use with that route enabled.
+AI Assistant 1.0.0 uses `grafana-llm-app` for model completions only. It does not connect to the LLM plugin's MCP server. On local installations that server can execute with a shared service account rather than the requesting user's permissions. Earlier development builds using shared MCP execution must not be published as safe for multi-user use with that route enabled.
 
 ## Required deployment containment
 

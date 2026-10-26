@@ -2,7 +2,7 @@
 
 A Grafana app for investigating metrics, finding dashboards, and making dashboard changes through conversational tasks. Model completions use [grafana-llm-app](https://github.com/grafana/grafana-llm-app); resource tools use native Grafana APIs as the signed-in user.
 
-This is an independent project, not the official Grafana Assistant. Current version: **2.2.4**. The running version is visible in the app.
+This is an independent project, not the official Grafana Assistant. Current version: **1.0.0**. The running version is visible in the app.
 
 ## Features
 
