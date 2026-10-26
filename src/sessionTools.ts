@@ -3,14 +3,16 @@ import { applyDashboardPatch } from './evidence';
 
 const string = { type: 'string' };
 const source = { datasourceUid: string };
+const operations = { type: 'array', minItems: 1, description: 'JSON Patch array relative to the dashboard model, e.g. [{"op":"remove","path":"/panels/5"}]. Paths must start with / or $.; no dashboard prefix.', items: { type: 'object', properties: { op: { type: 'string', enum: ['add', 'replace', 'remove'] }, path: { type: 'string', description: 'JSON Pointer such as /panels/5 or /panels, relative to the dashboard model.' }, value: {} }, required: ['op', 'path'], additionalProperties: false } };
 const definition = (name: string, description: string, properties: Record<string, object>, required: string[] = []) => ({ name, description, inputSchema: { type: 'object' as const, properties, required, additionalProperties: false } });
 export const sessionTools = [
+  definition('get_dashboard_creation_access', 'Check the signed-in user dashboard creation permissions and resolve a permitted destination folder before offering or planning a copy.', { folderUid: string }, []),
   definition('search_dashboards', 'Search dashboards accessible to the signed-in user.', { query: string, page: { type: 'number' } }),
   definition('get_dashboard_by_uid', 'Read a dashboard using the signed-in user permissions.', { uid: string }, ['uid']),
   definition('list_datasources', 'List datasource identities accessible to the signed-in user.', {}),
   definition('get_datasource_by_uid', 'Read a datasource identity as the signed-in user.', { uid: string }, ['uid']),
-  definition('update_dashboard', 'Create or update a classic dashboard, or apply patch operations to an existing dashboard. Grafana enforces the signed-in user permissions on the actual save. Preserve unrelated content.', { uid: string, dashboard: { type: 'object', additionalProperties: true }, operations: { type: 'array', items: { type: 'object', additionalProperties: true } }, folderUid: string, message: string, overwrite: { type: 'boolean' } }),
-  definition('create_dashboard_copy', 'Create a new modified copy of a readable dashboard only after the user explicitly requests a copy. Never edit or overwrite the source. Destination creation permissions are enforced by Grafana.', { sourceUid: string, title: string, operations: { type: 'array', items: { type: 'object', additionalProperties: true } }, folderUid: string }, ['sourceUid']),
+  definition('update_dashboard', 'Create or update a classic dashboard, or apply patch operations to an existing dashboard. Grafana enforces the signed-in user permissions on the actual save. Preserve unrelated content.', { uid: string, dashboard: { type: 'object', additionalProperties: true }, operations, folderUid: string, message: string, overwrite: { type: 'boolean' } }),
+  definition('create_dashboard_copy', 'Create a new modified copy of a readable dashboard after a copy request or acceptance of a pending copy offer. To remove panels, prefer removePanelIds; it handles nested row panels using the full source without model truncation. Make the modified copy in one save rather than a plain copy followed by edits. Never edit or overwrite the source. Destination creation permissions are enforced by Grafana.', { sourceUid: string, title: string, operations, removePanelIds: { type: 'array', minItems: 1, items: { type: 'integer' }, description: 'Exact panel IDs to remove recursively from the source. Mutually exclusive with operations. All other content is preserved.' }, folderUid: string }, ['sourceUid']),
   definition('query_prometheus', 'Run a PromQL query through Grafana as the signed-in user.', { ...source, expr: string, queryType: { type: 'string', enum: ['instant', 'range'] }, startTime: string, endTime: string, stepSeconds: { type: 'number' } }, ['datasourceUid', 'expr']),
   definition('list_prometheus_label_values', 'Read Prometheus label values using the signed-in user permissions.', { ...source, labelName: string }, ['datasourceUid', 'labelName']),
   definition('list_prometheus_label_names', 'Read Prometheus label names using the signed-in user permissions.', source, ['datasourceUid']),
@@ -38,6 +40,17 @@ export class SessionToolClient {
     const api = getBackendSrv();
     const identity = (d: any) => ({ uid: d.uid, name: d.name, type: d.type });
     switch (name) {
+      case 'get_dashboard_creation_access': {
+        const permissions = await api.get<Record<string, string[]>>('/api/access-control/user/permissions');
+        const scopes = [...(permissions['dashboards:create'] || []), ...(permissions['dashboards:write'] || [])];
+        if (typeof args.folderUid === 'string') {
+          const target = args.folderUid || 'general';
+          return { allowed: scopes.some(scope => ['*', 'folders:*', 'folders:uid:*', 'folders:uid:' + target].includes(scope)), folderUid: args.folderUid };
+        }
+        if (scopes.some(scope => ['*', 'folders:*', 'folders:uid:*'].includes(scope))) return { allowed: true, folderUid: '' };
+        const destination = scopes.find(scope => /^folders:uid:[a-zA-Z0-9_-]+$/.test(scope));
+        return destination ? { allowed: true, folderUid: destination.slice('folders:uid:'.length).replace(/^general$/, '') } : { allowed: false };
+      }
       case 'search_dashboards': return api.get('/api/search', { type: 'dash-db', query: String(args.query || ''), page: Number(args.page) || 1, limit: 100 });
       case 'get_dashboard_by_uid': return api.get(`/api/dashboards/uid/${identifier(args.uid, 'dashboard UID')}`);
       case 'list_datasources': return (await api.get<any[]>('/api/datasources')).map(identity);
@@ -47,6 +60,19 @@ export class SessionToolClient {
         const original = await api.get(`/api/dashboards/uid/${sourceUid}`);
         if (!original.dashboard || !Array.isArray(original.dashboard.panels)) throw new Error('No readable classic dashboard was returned.');
         const dashboard = args.operations !== undefined ? applyDashboardPatch(original.dashboard, args.operations) : JSON.parse(JSON.stringify(original.dashboard));
+        if (args.removePanelIds !== undefined) {
+          if (args.operations !== undefined) throw new Error('Choose removePanelIds or operations, not both.');
+          if (!Array.isArray(args.removePanelIds) || !args.removePanelIds.length || !args.removePanelIds.every(Number.isInteger)) throw new Error('removePanelIds requires a non-empty array of integer panel IDs.');
+          const wanted = new Set(args.removePanelIds);
+          const found = new Set<number>();
+          const remove = (panels: any[]): any[] => panels.filter(panel => {
+            if (wanted.has(panel.id)) { found.add(panel.id); return false; }
+            if (Array.isArray(panel.panels)) panel.panels = remove(panel.panels);
+            return true;
+          });
+          dashboard.panels = remove(dashboard.panels);
+          if ([...wanted].some(id => !found.has(id as number))) throw new Error('A requested panel ID was not found in the source; no copy was created.');
+        }
         dashboard.id = null; dashboard.uid = null; dashboard.version = 0;
         dashboard.title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : `${original.dashboard.title} (copy)`;
         const saved = await api.post('/api/dashboards/db', { dashboard, ...(args.folderUid !== undefined ? { folderUid: args.folderUid } : {}), overwrite: false, message: 'AI Assistant: create modified dashboard copy' });

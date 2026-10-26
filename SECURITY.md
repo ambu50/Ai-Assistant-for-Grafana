@@ -1,6 +1,6 @@
 # Authorization boundary
 
-AI Assistant 2.1.0 uses `grafana-llm-app` for model completions only. It does not connect to the LLM plugin's MCP server. On local installations that server can execute with a shared service account rather than the requesting user's permissions. Releases before 2.1.0 must not be published as safe for multi-user use with that route enabled.
+AI Assistant 2.2.4 uses `grafana-llm-app` for model completions only. It does not connect to the LLM plugin's MCP server. On local installations that server can execute with a shared service account rather than the requesting user's permissions. Releases before 2.1.0 must not be published as safe for multi-user use with that route enabled.
 
 ## Required deployment containment
 
@@ -25,6 +25,12 @@ Automated tests cover session endpoint routing, rejected/unknown tool dispatch, 
 
 These checks are not an independent security audit. Other Grafana plugins and endpoints require their own access-control review. Do not re-enable privileged shared MCP for untrusted users. Adding a tool requires a native user-scoped server endpoint and authorization tests before exposing its schema.
 
-## Modified copy fallback (2.2.0)
+## Modified copies and authorization preflight
 
-A denied dashboard edit may produce a copy offer only if the source remains readable under the same user session. The offer is not an automatic retry or mutation. Selecting it creates an explicit new user request. `create_dashboard_copy` re-reads the source, applies requested patch operations to an independent clone, clears dashboard id/uid/version, and forces overwrite=false. The server authorizes creation in the destination folder; a Viewer without creation permission remains denied. Unreadable dashboards cannot be copied. Copies are read back using the same user identity before success is reported.
+Edit requests for an attached dashboard check native save/edit metadata before contacting the model. Later-resolved edits refresh permissions before validating mutation payloads. Final saves remain server-authorized.
+
+A read-only source may produce a copy offer only after the current user's creation scopes identify a permitted destination. Dashboard-specific write permission alone is not creation permission. Accepting the offer with the button or an affirmative reply authorizes the offered source and requested changes. The destination is rechecked before model work; a denial is not retried through another identity or folder.
+
+The copy dispatcher re-reads the source, applies changes to an independent clone, clears id/uid/version, and forces overwrite=false. Panel removal supports exact IDs, including nested row panels, in one save. Copies are read back under the same identity before success is reported. Unknown panel IDs are rejected before creation. If destination permission cannot be verified, no copy is offered.
+
+A shared writable folder is not personal isolation. Use folder/dashboard ACLs to control access between users. Frontend checks improve behavior but cannot grant access or replace Grafana's server authorization.

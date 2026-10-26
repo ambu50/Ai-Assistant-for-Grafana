@@ -27,6 +27,7 @@ describe.skipIf(!enabled)('live readonly-user authorization regression', () => {
     // Abort before any attempted save if the test account unexpectedly has Edit.
     expect(before.meta.canSave).toBe(false);
     const client = new SessionToolClient();
+    await expect(client.callTool({ name: 'get_dashboard_creation_access', arguments: {} })).resolves.toEqual({ allowed: false });
     await expect(client.callTool({ name: 'update_dashboard', arguments: { dashboard: before.dashboard, userId: 1, isAdmin: true, overwrite: true } })).rejects.toMatchObject({ status: 403 });
     // Same, unchanged content: verifies Grafana's actual server boundary without
     // attempting to delete content even if the server unexpectedly grants access.

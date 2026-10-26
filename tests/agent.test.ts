@@ -13,7 +13,7 @@ const tool = (name: string) => ({ choices: [{ message: { role: 'assistant', cont
 beforeEach(() => {
   vi.resetAllMocks(); mocks.enabled.mockResolvedValue(true); mocks.mcpEnabled.mockResolvedValue(true);
   mocks.list.mockResolvedValue({ tools: [{ name: 'update_dashboard' }, { name: 'search_dashboards' }, { name: 'get_dashboard_by_uid' }] });
-  mocks.close.mockResolvedValue(undefined); mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_by_uid' ? { content: [{ type: 'text', text: JSON.stringify({ dashboard: { uid: 'test', title: 'New Dashboard', panels: [], version: 1 } }) }] } : { content: [] });
+  mocks.close.mockResolvedValue(undefined); mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: true, folderUid: '' } : name === 'get_dashboard_by_uid' ? { content: [{ type: 'text', text: JSON.stringify({ dashboard: { uid: 'test', title: 'New Dashboard', panels: [], version: 1 } }) }] } : { content: [] });
 });
 describe('investigation agent', () => {
   it('reports waiting before a slow model returns and tool progress during execution', async () => {
@@ -290,12 +290,13 @@ it('stops immediately on a native Grafana authorization denial without alternate
 it('offers a copy after an edit denial only when the source remains readable, without automatically creating it', async () => {
   mocks.chat.mockResolvedValueOnce(tool('update_dashboard'));
   mocks.call.mockImplementation(async ({ name }) => {
+    if (name === 'get_dashboard_creation_access') return { allowed: true, folderUid: '' };
     if (name === 'get_dashboard_by_uid') return { dashboard: { uid: 'test', title: 'Protected dashboard', panels: [], version: 1 } };
     throw { status: 403 };
   });
   const text = vi.fn();
   await runAgent([{ role: 'user', content: 'Remove the CPU panel' }], '', new AbortController().signal, text, vi.fn());
-  expect(text).toHaveBeenCalledWith(expect.stringContaining('do not have permission'), undefined, expect.any(Array), { sourceUid: 'test', sourceTitle: 'Protected dashboard', request: 'Remove the CPU panel' });
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('do not have permission'), undefined, expect.any(Array), { sourceUid: 'test', sourceTitle: 'Protected dashboard', request: 'Remove the CPU panel', folderUid: '' });
   expect(mocks.call.mock.calls.filter(([call]) => call.name === 'update_dashboard')).toHaveLength(1);
   expect(mocks.call.mock.calls.some(([call]) => call.name === 'create_dashboard_copy')).toBe(false);
 });
@@ -303,10 +304,77 @@ it('verifies the new copy rather than the protected source after an explicit cop
   mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }, { name: 'get_dashboard_by_uid' }] });
   const expected = { id: null, uid: null, version: 0, title: 'Source (copy)', panels: [{ id: 2 }] };
   mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: JSON.stringify({ sourceUid: 'source', operations: [{ op: 'remove', path: '/panels/0' }] }) } }] } }] }).mockResolvedValueOnce(answer);
-  mocks.call.mockImplementation(async ({ name }) => name === 'create_dashboard_copy' ? { uid: 'copied', title: 'Source (copy)', expectedDashboard: expected } : { dashboard: { ...expected, uid: 'copied', id: 20, version: 1 } });
+  mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: true, folderUid: '' } : name === 'create_dashboard_copy' ? { uid: 'copied', title: 'Source (copy)', expectedDashboard: expected } : { dashboard: { ...expected, uid: 'copied', id: 20, version: 1 } });
   const text = vi.fn();
   await runAgent([{ role: 'user', content: 'Create a modified copy with create_dashboard_copy; remove the first panel.' }], '', new AbortController().signal, text, vi.fn());
   expect(mocks.call).toHaveBeenCalledWith({ name: 'get_dashboard_by_uid', arguments: { uid: 'copied' } });
   expect(text.mock.calls.at(-1)?.[1]).toContainEqual(expect.objectContaining({ uid: 'copied' }));
   expect(mocks.call.mock.calls.some(([call]) => call.name === 'update_dashboard')).toBe(false);
+});
+it.each(['ok', 'yes please', 'go ahead'])('executes and verifies the offered copy after %s', async reply => {
+  mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }, { name: 'get_dashboard_by_uid' }] });
+  const expected = { id: null, uid: null, version: 0, title: 'Source (copy)', panels: [{ id: 2 }] };
+  mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: JSON.stringify({ sourceUid: 'source', operations: [{ op: 'remove', path: '/panels/0' }] }) } }] } }] }).mockResolvedValueOnce(answer);
+  mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: true, folderUid: '' } : name === 'create_dashboard_copy' ? { uid: 'copied', title: 'Source (copy)', expectedDashboard: expected } : { dashboard: { ...expected, uid: 'copied', id: 20, version: 1 } });
+  const text = vi.fn();
+  await runAgent([{ role: 'assistant', content: 'I can create a copy.', copyOffer: { sourceUid: 'source', sourceTitle: 'Source', request: 'Remove the first panel' } }, { role: 'user', content: reply }], '', new AbortController().signal, text, vi.fn());
+  expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ name: 'create_dashboard_copy' }));
+  expect(text.mock.calls.at(-1)?.[1]).toContainEqual(expect.objectContaining({ uid: 'copied' }));
+  expect(mocks.chat.mock.calls[0][0].messages).toContainEqual(expect.objectContaining({ role: 'system', content: expect.stringContaining('Remove the first panel') }));
+});
+it.each(['other', undefined])('rejects a copy of %s without matching consent', async sourceUid => {
+  mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }] });
+  mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: JSON.stringify({ sourceUid: sourceUid || 'source' }) } }] } }] }).mockResolvedValueOnce(answer);
+  await runAgent([...(sourceUid ? [{ role: 'assistant' as const, content: 'Offer', copyOffer: { sourceUid: 'source', sourceTitle: 'Source', request: 'Remove panel' } }] : []), { role: 'user', content: 'ok' }], '', new AbortController().signal, vi.fn(), vi.fn());
+  expect(mocks.call.mock.calls.every(([call]) => call.name === 'get_dashboard_creation_access')).toBe(true);
+});
+it('explains copy creation denial and marks it terminal without another model retry', async () => {
+  mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }] });
+  mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: '{"sourceUid":"source","removePanelIds":[7]}' } }] } }] });
+  mocks.call.mockRejectedValue({ status: 403 });
+  const text = vi.fn(), progress = vi.fn();
+  await runAgent([{ role: 'user', content: 'Create a copy without panel 7' }], '', new AbortController().signal, text, vi.fn(), 'off', progress);
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('dashboard creation permission'), undefined, expect.any(Array));
+  expect(progress.mock.calls.at(-1)![0].blockedReason).toContain('denied creation');
+  expect(mocks.call).toHaveBeenCalledTimes(1);
+  expect(mocks.chat).toHaveBeenCalledTimes(1);
+});
+it('checks selected dashboard authorization before any model work and offers a copy immediately', async () => {
+  mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: true, folderUid: 'personal' } : { dashboard: { uid: 'protected', title: 'Node Exporter Overview', panels: [] }, meta: { canSave: false, canEdit: false } });
+  const text = vi.fn(), progress = vi.fn();
+  await runAgent([{ role: 'user', content: 'remove avg uptime panel from this dashboard' }], JSON.stringify({ dashboard: { dashboardUid: 'protected' } }), new AbortController().signal, text, vi.fn(), 'off', progress);
+  expect(mocks.enabled).not.toHaveBeenCalled();
+  expect(mocks.chat).not.toHaveBeenCalled();
+  expect(mocks.call).toHaveBeenCalledWith({ name: 'get_dashboard_by_uid', arguments: { uid: 'protected' } });
+  expect(mocks.call).toHaveBeenCalledTimes(2);
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('original was not changed'), undefined, [], { sourceUid: 'protected', sourceTitle: 'Node Exporter Overview', request: 'remove avg uptime panel from this dashboard', folderUid: 'personal' });
+  expect(progress.mock.calls.at(-1)![0].blockedReason).toContain('read-only');
+});
+it('does not run a model or attempt edits if authorization preflight cannot read the selected dashboard', async () => {
+  mocks.call.mockRejectedValue({ status: 403 });
+  await expect(runAgent([{ role: 'user', content: 'edit this dashboard' }], '{"dashboard":{"dashboardUid":"protected"}}', new AbortController().signal, vi.fn(), vi.fn())).rejects.toThrow('Checking dashboard permissions');
+  expect(mocks.chat).not.toHaveBeenCalled();
+});
+it('continues to the model after a successful native permission check', async () => {
+  mocks.call.mockResolvedValue({ dashboard: { uid: 'editable', title: 'Editable', panels: [] }, meta: { canSave: true, canEdit: true } });
+  mocks.chat.mockResolvedValueOnce(answer);
+  await runAgent([{ role: 'user', content: 'edit this dashboard' }], '{"dashboard":{"dashboardUid":"editable"}}', new AbortController().signal, vi.fn(), vi.fn());
+  expect(mocks.call.mock.invocationCallOrder[0]).toBeLessThan(mocks.enabled.mock.invocationCallOrder[0]);
+  expect(mocks.chat).toHaveBeenCalledTimes(1);
+});
+it('does not offer a copy or contact the model when edit and create permissions are missing', async () => {
+  mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: false } : { dashboard: { uid: 'protected', title: 'Source', panels: [] }, meta: { canSave: false, canEdit: false } });
+  const text = vi.fn();
+  await runAgent([{ role: 'user', content: 'remove uptime panel' }], '{"dashboard":{"dashboardUid":"protected"}}', new AbortController().signal, text, vi.fn());
+  expect(mocks.enabled).not.toHaveBeenCalled(); expect(mocks.chat).not.toHaveBeenCalled();
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('no permitted destination'), undefined, []);
+  expect(text.mock.calls[0][3]).toBeUndefined();
+});
+it('rechecks copy creation permission on ok before contacting the model', async () => {
+  mocks.call.mockResolvedValue({ allowed: false });
+  const text = vi.fn();
+  await runAgent([{ role: 'assistant', content: 'Copy offer', copyOffer: { sourceUid: 'protected', sourceTitle: 'Source', request: 'remove panel', folderUid: 'personal' } }, { role: 'user', content: 'ok' }], '', new AbortController().signal, text, vi.fn());
+  expect(mocks.call).toHaveBeenCalledExactlyOnceWith({ name: 'get_dashboard_creation_access', arguments: { folderUid: 'personal' } });
+  expect(mocks.chat).not.toHaveBeenCalled();
+  expect(text).toHaveBeenCalledWith(expect.stringContaining('no verified permission'), undefined, []);
 });

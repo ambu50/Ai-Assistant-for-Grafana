@@ -1,6 +1,6 @@
 # AI Assistant deployment
 
-Version 2.0.0 uses plugin ID `ai-assistant-app` and route `/a/ai-assistant-app`.
+Version 2.2.4 uses plugin ID `ai-assistant-app` and route `/a/ai-assistant-app`.
 
 Build with `npm ci`, `npm run typecheck`, `npm test`, and `npm run build`.
 Copy `dist/` into Grafana's plugin directory under `ai-assistant-app`.
@@ -9,21 +9,25 @@ Install and configure `grafana-llm-app`. For unsigned development builds, add on
 `provisioning/plugins/apps.yaml`, enable it for the intended organization, and
 restart Grafana.
 
-The source is provider-independent. Model configuration and MCP authentication
+The source is provider-independent. Model configuration and provider credentials
 belong to `grafana-llm-app`. No model endpoints or credentials are embedded here.
 
 Grafana panel menus expose **Ask AI Assistant**. The command palette exposes
 **AI Assistant chat**. The main page supports dashboard and datasource attachments.
 
 
-## 2.1.0 security change
+## Multi-user configuration
 
-Model completions still use grafana-llm-app. Resource tools now use native Grafana API requests with the signed-in session; the privileged shared MCP transport has been removed. The local deployment has a dedicated ai-assistant-llm-security provisioning ConfigMap with MCP disabled and provider configuration preserved. Other apps using the shared MCP service lose those tools until a user-scoped replacement is configured.
+Resource tools use native Grafana APIs with the signed-in session. The app uses grafana-llm-app for model completions only. Disable its shared MCP server while preserving provider configuration and secure settings, then restart Grafana. This affects other apps using that shared endpoint; model completions remain available. See [SECURITY.md](SECURITY.md).
 
-See SECURITY.md for the authorization boundary and deployment requirements. The live non-admin test user had canSave=false; native save returned HTTP 403 without changing dashboard version, and shared MCP initialization returned HTTP 404. User/organization-scoped history intentionally does not import unattributed legacy conversations.
+## Folder permissions and copies
 
-## 2.2.0 modified-copy fallback
+The app discovers permitted copy destinations from current-user creation scopes, not folder names. To let Viewers create copies while keeping shared dashboards read-only, grant appropriate access to a destination folder. Shared Edit access allows collaboration inside that folder; use separate ACLs for personal isolation.
 
-After a denied dashboard edit, the assistant rechecks readability and offers Create modified copy. It never copies automatically on denial. The action persists with the conversation and submits an explicit copy request. The copy dispatcher clears id/uid/version, forces overwrite=false, preserves unaffected settings, and applies requested patch operations to a separate model. Grafana authorizes destination creation; source and destination failures do not use alternate identities. The agent reads back and verifies the new UID before reporting success.
+Read-only sources receive copy offers only when a permitted destination can be verified. Acceptance is scoped to the source, requested changes, and destination. Destination permission is rechecked before model work, and Grafana authorizes the actual save. Copies use new identities and overwrite=false, and are read back for verification.
 
-Regression tests cover the offer without automatic creation, persisted action, fresh identity, source preservation, destination denial, unreadable sources and copy read-back verification.
+## Deployment validation
+
+Test tool calling with the configured provider, an allowed edit, a read-only source with a writable destination, and a user with neither edit nor creation permission. The optional live negative authorization test is documented in [README.md](README.md).
+
+User/organization-scoped browser history intentionally does not import unattributed legacy conversations. Active tasks survive SPA navigation but not a full browser reload. Production distribution requires plugin signing; the included Compose setup is for development.

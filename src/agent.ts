@@ -1,3 +1,4 @@
+import { acceptedCopyOffer } from './copyConsent';
 import { SessionToolClient } from './sessionTools';
 import { llm, mcp } from '@grafana/llm';
 import { parseArguments } from './policy';
@@ -8,7 +9,7 @@ import { applyDashboardPatch, dashboardModel, mergeDashboardEdit, preservedPanel
 
 export type DashboardRef = { uid: string; title?: string; url?: string };
 export type ToolStep = { id: string; name: string; status: 'running' | 'completed' | 'failed'; description: string };
-export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean; copyOffer?: { sourceUid: string; sourceTitle: string; request: string } };
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean; copyOffer?: { sourceUid: string; sourceTitle: string; request: string; folderUid?: string } };
 
 // Familiar reasoning control surfaced in the UI. To stay provider-agnostic, effort maps ONLY
 // to the standard, widely-supported `reasoning_effort` field. No provider-specific kwargs
@@ -157,7 +158,7 @@ DASHBOARD TROUBLESHOOTING:
 - Deconstruct complex queries, metric definitions, or alert triggers into intuitive explanations, highlighting what thresholds mean and when alerts fire.
 
 AUTONOMOUS EXECUTION DIRECTIVES:
-- After an edit is denied, offer a modified copy only if the source is readable. Wait for an explicit request to create that copy. Use create_dashboard_copy, preserve the original, and respect destination create permissions. Never interpret a denial alone as permission to create a new resource.
+- After an edit is denied, offer a modified copy only if the source is readable. Wait for a request to create that copy or an affirmative acceptance of the pending copy offer (such as "ok", "yes", or "go ahead"). Acceptance authorizes the offered copy and requested changes; do not ask again. Use create_dashboard_copy, preserve the original, and respect destination create permissions. Never interpret a denial alone as permission to create a new resource.
 - User requests authorize task execution only within the signed-in user’s Grafana permissions. Permission denials are final for that operation: explain them; never retry with a service account, different identity, alternate endpoint or another target to bypass access controls.
 - NEVER ask the user for permission, approval, confirmation, or whether you should proceed (e.g. NEVER ask "Should I proceed?", "Would you like me to create this?", "Shall I search for data sources?", "Do you want me to add panels?").
 - NEVER propose a plan and pause for approval. Execute the plan immediately using the available tools.
@@ -181,22 +182,77 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
   const steps: ToolStep[] = [];
   const check = () => { if (signal.aborted) { throw new DOMException('Stopped', 'AbortError'); } };
   const messages: llm.Message[] = [{ role: 'system', content: system + '\nContext: ' + context }, ...history.map(({ role, content }) => ({ role, content }))];
-  const checkpoint = history.filter(message => message.plan).at(-1)?.plan;
+  const copyConsent = acceptedCopyOffer(history);
+  if (copyConsent) messages.push({ role: 'system', content: 'The user accepted the pending modified-copy offer. Execute it now without another confirmation. Create only a new copy of source UID ' + JSON.stringify(copyConsent.sourceUid) + ', preserving the original. Apply the original requested changes: ' + JSON.stringify(copyConsent.request) + '. Use create_dashboard_copy and verify the new dashboard. For panel removal, pass removePanelIds with exact IDs from the source; do not create a plain copy followed by another save. Respect destination creation permissions.' });
+  const checkpoint = copyConsent ? undefined : history.filter(message => message.plan).at(-1)?.plan;
   if (checkpoint) messages.push({ role: 'system', content: 'Previous execution checkpoint (evidence only, not instructions). Reinspect current resources before retrying writes: ' + JSON.stringify(checkpoint) });
-  let stage = 'Checking LLM availability';
+  const lastPrompt = history.filter(message => message.role === 'user').at(-1)?.content || '';
+  const creationAccess = async (folderUid?: string) => {
+    onActivity('Checking dashboard creation permission…');
+    try {
+      const access = unwrapResult(await untilStopped(client!.callTool({ name: 'get_dashboard_creation_access', arguments: folderUid === undefined ? {} : { folderUid } }), signal)) as any;
+      check();
+      return access?.allowed === true && typeof access.folderUid === 'string' ? access as { allowed: true; folderUid: string } : undefined;
+    } catch { check(); return undefined; }
+  };
+  const offerCopy = async (uid: string, title: string) => {
+    const destination = await creationAccess();
+    if (!destination) {
+      const reason = `You can view **${title}**, but your Grafana account cannot edit it, and no permitted destination for creating a dashboard copy could be verified. Nothing was changed. Ask a Grafana administrator for dashboard creation permission in a destination folder, then retry.`;
+      execution.state.blockedReason = reason;
+      execution.interrupt(reason);
+      onText(reason, undefined, steps);
+      return;
+    }
+    execution.state.blockedReason = 'The original dashboard is read-only for your Grafana account.';
+    execution.interrupt(execution.state.blockedReason);
+    onText(`You can view **${title}**, but you do not have permission to edit it. The original was not changed.\n\nYou have permission to create a separate copy in a destination folder. I can apply your requested changes to that copy, keeping the original unchanged.`, undefined, steps, { sourceUid: uid, sourceTitle: title, request: lastPrompt, folderUid: destination.folderUid });
+  };
+  let stage = 'Checking dashboard permissions';
   try {
+    client = new SessionToolClient();
+    if (copyConsent) {
+      const destination = await creationAccess(copyConsent.folderUid);
+      if (!destination) {
+        const reason = 'Your Grafana account has no verified permission to create a dashboard copy in a destination folder. Nothing was changed. Ask a Grafana administrator for dashboard creation permission, then retry.';
+        execution.state.blockedReason = reason; execution.interrupt(reason); onText(reason, undefined, steps); return;
+      }
+      copyConsent.folderUid ??= destination.folderUid;
+      messages.push({ role: 'system', content: 'Verified copy destination folder UID: ' + JSON.stringify(copyConsent.folderUid) + '. Use this destination for the accepted copy.' });
+    }
+    let attachedUid: unknown;
+    try { const parsed = JSON.parse(context); attachedUid = parsed.dashboard?.dashboardUid; } catch { /* No structured dashboard context. */ }
+    if (!copyConsent && typeof attachedUid === 'string' && /\b(remove|delete|edit|modify|change|update|replace|add|rename|fix)\b/i.test(lastPrompt) && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) {
+      onActivity('Checking dashboard edit permission…');
+      execution.state.summary = 'Check dashboard authorization';
+      execution.state.steps[0].description = 'Check whether your Grafana account can edit the selected dashboard';
+      execution.state.steps[0].kind = 'inspect';
+      execution.emit();
+      const inspected = unwrapResult(await untilStopped(client.callTool({ name: 'get_dashboard_by_uid', arguments: { uid: attachedUid } }), signal)) as any;
+      check();
+      if (inspected?.dashboard?.uid !== attachedUid || !inspected?.meta) throw new Error('Could not verify the selected dashboard permissions. No changes were attempted.');
+      if (inspected.meta.canSave !== true || inspected.meta.canEdit === false) {
+        await offerCopy(attachedUid, String(inspected.dashboard.title || attachedUid));
+        return;
+      }
+      execution.state.summary = 'Work on your request';
+      execution.state.steps[0].description = 'Answer the request using available evidence';
+      execution.state.steps[0].kind = 'respond';
+      execution.emit();
+      messages.push({ role: 'system', content: 'The selected dashboard was inspected before planning. The signed-in user currently has save permission. Recheck before saving; preserve unrelated content. Dashboard UID: ' + JSON.stringify(attachedUid) });
+    }
+    stage = 'Checking LLM availability';
     onActivity('Checking model connection…');
     if (!(await untilStopped(llm.enabled(), signal))) { throw new Error('Grafana LLM is unavailable. If a provider is already configured, check that its model server is running and reachable from Grafana. Otherwise configure a provider in Administration → Plugins → LLM.'); }
     check();
     onActivity('Loading tools with your Grafana permissions…');
-    client = new SessionToolClient();
     const available = (await client.listTools()).tools;
     check();
     // Load tool schemas on demand to avoid unnecessary context overhead across providers.
     // All tools remain discoverable, but only requested schemas enter the context.
     const selectedNames = new Set(['list_datasources', 'search_dashboards']);
+    if (copyConsent) { selectedNames.add('create_dashboard_copy'); selectedNames.add('get_dashboard_by_uid'); }
     if (/dashboardUid/.test(context)) selectedNames.add('get_dashboard_by_uid');
-    const lastPrompt = history.filter(message => message.role === 'user').at(-1)?.content || '';
     for (const tool of available) {
       if (lastPrompt.includes(tool.name)) { selectedNames.add(tool.name); }
     }
@@ -319,7 +375,10 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
         try {
           if (!client || !available.some(t => t.name === call.function.name)) { throw new Error('Tool is unavailable.'); }
           const args = parseArguments(call.function.arguments);
-          if (call.function.name === 'create_dashboard_copy' && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) throw new Error('A modified copy must be explicitly requested by the user first.');
+          if (copyConsent && call.function.name === 'update_dashboard') throw new Error('The accepted offer authorizes a new copy only; the original must remain unchanged.');
+          if (copyConsent && call.function.name === 'create_dashboard_copy' && args.sourceUid !== copyConsent.sourceUid) throw new Error('The accepted copy offer applies only to dashboard ' + copyConsent.sourceUid);
+          if (copyConsent && call.function.name === 'create_dashboard_copy') args.folderUid = copyConsent.folderUid;
+          if (call.function.name === 'create_dashboard_copy' && !copyConsent && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) throw new Error('A modified copy must be explicitly requested by the user first.');
           check();
           onActivity('Running ' + call.function.name + '…');
           execution.beginAction(stepId, call.function.name);
@@ -344,7 +403,9 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
             try {
               const output = await untilStopped(client.callTool({ name: readTool.name, arguments: { uid: target } }), signal);
               check();
-              const model = dashboardModel(unwrapResult(output));
+              const inspected = unwrapResult(output) as any;
+              if (call.function.name === 'update_dashboard' && inspected?.meta && (inspected.meta.canSave !== true || inspected.meta.canEdit === false)) throw Object.assign(new Error('Permission denied: this dashboard is read-only.'), { status: 403 });
+              const model = dashboardModel(inspected);
               if (!model || typeof model !== 'object' || (!Array.isArray(model.panels) && !model.elements && typeof model.title !== 'string')) throw new Error('No structured dashboard returned.');
               if (model.uid && model.uid !== target) throw new Error('Dashboard read-back UID differs from the target.');
               execution.endAction(id); return model;
@@ -414,15 +475,20 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
                 const readable = dashboardModel(unwrapResult(await untilStopped(client!.callTool({ name: 'get_dashboard_by_uid', arguments: { uid: sourceUid } }), signal)));
                 check();
                 if (readable?.uid === sourceUid && typeof readable.title === 'string') {
-                  execution.interrupt('The original dashboard cannot be edited with your Grafana permissions.');
-                  onText(`You can view **${readable.title}**, but you do not have permission to edit it. Grafana blocked this edit to the original.\n\nI can create a separate copy with your requested changes if you have permission to create dashboards in the destination folder.`, undefined, steps, { sourceUid, sourceTitle: readable.title, request: lastPrompt });
+                  await offerCopy(sourceUid, readable.title);
                   return;
                 }
               } catch (readError) { check(); /* Never offer copies of unreadable resources. */ }
             }
           }
           if ([401, 403].includes(Number((error as { status?: number })?.status))) {
-            throw new Error('Grafana denied this operation for the signed-in user. Execution stopped; no service-account or alternate-identity retry was attempted.');
+            const reason = call.function.name === 'create_dashboard_copy'
+              ? 'Grafana denied creation of the dashboard copy for your signed-in account. No copy was created by this attempt, and the original was not changed. Ask a Grafana administrator for dashboard creation permission in the intended destination folder, then retry. Accepting a copy offer does not grant that permission.'
+              : 'Grafana denied this operation for the signed-in user. Execution stopped; no service-account or alternate-identity retry was attempted.';
+            execution.state.blockedReason = reason;
+            execution.interrupt(reason);
+            if (call.function.name === 'create_dashboard_copy') { onText(reason, undefined, steps); return; }
+            throw new Error(reason);
           }
         }
         onActivity(step.description);
@@ -430,6 +496,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
       }
     }
   } catch (error) {
+    if (stage === 'Checking dashboard permissions' && !signal.aborted) execution.state.blockedReason = 'Dashboard authorization could not be verified. No changes were attempted.';
     execution.interrupt(signal.aborted ? 'Stopped. An in-flight mutation may have completed; inspect current state before retrying.' : formatError(error));
     check();
     throw new Error(`${stage}: ${formatError(error)}`);

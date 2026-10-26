@@ -16,6 +16,7 @@ export interface DashboardEvidence {
   uid: string; status: 'verified' | 'unverified'; detail: string; at: number;
 }
 export interface TaskPlan {
+  blockedReason?: string;
   revision: number; summary: string; steps: PlanStep[]; actions: ExecutionRecord[];
   queries: QueryEvidence[]; dashboards: DashboardEvidence[];
 }

@@ -4,7 +4,7 @@
   "id": "ai-assistant-app",
   "preload": true,
   "info": {
-    "description": "An observability assistant powered by Grafana LLM and MCP.",
+    "description": "An observability assistant powered by Grafana LLM with session-authenticated Grafana tools.",
     "author": {
       "name": "AI Assistant"
     },
@@ -19,8 +19,8 @@
     },
     "links": [],
     "screenshots": [],
-    "version": "2.2.0",
-    "updated": "2026-10-25"
+    "version": "2.2.4",
+    "updated": "2026-10-26"
   },
   "dependencies": {
     "grafanaDependency": ">=12.0.0",
