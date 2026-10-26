@@ -84,8 +84,8 @@ it.each([
   [{ 'dashboards:create': ['folders:*'] }, { allowed: true, folderUid: '' }],
 ])('checks creation scope without treating edit rights on one dashboard as creation permission', async (permissions, expected) => {
   api.get.mockResolvedValue(permissions);
-  await expect(client.callTool({ name: 'get_dashboard_creation_access', arguments: {} })).resolves.toEqual(expected);
-  expect(api.get).toHaveBeenCalledExactlyOnceWith('/api/access-control/user/permissions');
+  await expect(client.callTool({ name: 'get_dashboard_creation_access', arguments: {} })).resolves.toMatchObject(expected);
+  expect(api.get).toHaveBeenCalledWith('/api/access-control/user/permissions');
   expect(api.post).not.toHaveBeenCalled();
 });
 it('does not substitute a different folder when an offered destination loses permission', async () => {

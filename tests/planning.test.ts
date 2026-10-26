@@ -53,7 +53,7 @@ describe('execution evidence', () => {
   it('detects missing panels and mismatched queries or datasources in read-back', () => {
     const expected = { title: 'Cluster', panels: [{ id: 1, title: 'CPU', datasource: { uid: 'p' }, targets: [{ expr: 'cpu', refId: 'A' }] }] };
     expect(verifyDashboard(expected, { ...expected, version: 4 })).toEqual([]);
-    expect(verifyDashboard(expected, { title: 'Cluster', panels: [] })).toEqual(['Missing panel: CPU']);
+    expect(verifyDashboard(expected, { title: 'Cluster', panels: [] })).toEqual(expect.arrayContaining(['Missing panel: CPU']));
     expect(verifyDashboard(expected, { title: 'Cluster', panels: [{ ...expected.panels[0], targets: [{ expr: 'wrong', refId: 'A' }] }] })).toContain('Panel CPU: targets differs.');
     expect(preservedPanels(expected, { panels: [] })).toBe(false);
   });

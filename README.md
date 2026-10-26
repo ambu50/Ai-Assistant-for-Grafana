@@ -11,7 +11,7 @@ This is an independent project, not the official Grafana Assistant. Current vers
 - Search and inspect dashboards, query Prometheus, and create or update classic dashboards.
 - Follow task plans, tool activity, and progress while the model works. Stop active tasks when needed.
 - Execute authorized tasks without repeated per-tool approval prompts.
-- Check permissions before model planning for edit requests on an attached dashboard.
+- Check permissions before model planning for every request with an attached dashboard.
 - Offer modified copies of read-only dashboards only when a permitted destination can be verified. Accept with **Create modified copy**, “ok,” “yes,” or “go ahead.”
 - Store conversations and checkpoints in the browser, scoped to the Grafana user and organization.
 
@@ -81,7 +81,7 @@ The app uses panel-menu and command-palette integrations. It does not install a 
 
 Grafana permissions apply to resource requests and the final save. Creator identity is not an ownership boundary: users with Edit permission may modify dashboards created by someone else.
 
-For an edit request on an attached dashboard, the app checks native save/edit metadata before contacting the model. If the source is read-only, it checks creation scopes before offering a copy. The offer is bound to a permitted folder; acceptance rechecks that destination before model work. If no destination can be verified, the assistant explains the restriction immediately.
+For every request with an attached dashboard, the app checks native save/edit metadata before contacting the model, regardless of request language. Read-only questions remain supported. If the source is read-only, it checks creation scopes before offering a copy. The offer shows a permitted folder by name and lets you select another verified destination; acceptance rechecks that destination before model work. If no destination can be verified, the assistant explains the restriction immediately.
 
 A modified copy uses a new dashboard identity, overwrite disabled, and read-back verification. Exact panel IDs can be removed, including nested row panels, in one save. The original stays unchanged.
 
@@ -94,6 +94,8 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+GitHub Actions runs type checks, tests, and a production build on Node.js 22 and 24. Direct dependencies are pinned to the versions in the lockfile.
 
 Tests cover tool dispatch, authorization preflight, copy acceptance and destination scopes, source preservation, patches, read-back verification, task dependencies, cancellation, and user-scoped storage.
 
@@ -113,7 +115,7 @@ Unit tests do not establish compatibility with every provider. Test tool calling
 ## Limitations
 
 - Resource tools cover classic dashboards, data source identities, and Prometheus queries/labels. Alert administration, Loki, arbitrary HTTP/SQL execution, and trace visualization are not exposed.
-- There is no application-wide step or model-round cap. Provider context/output limits and timeouts still apply. Tool results sent to the model are capped at 24,000 characters per call.
+- There is no application-wide step or model-round cap. Provider context/output limits and timeouts still apply. The app does not truncate tool results or impose a character limit; provider context limits still apply.
 - Responses appear when a model turn completes, rather than token streaming. Progress describes execution activity, not private model reasoning.
 - Dashboard context is a launch-time snapshot, not continuous synchronization. Edits refresh current state before saving.
 - Active tasks survive Grafana SPA navigation but not a full reload. Checkpoints allow continuation unless authorization blocks the task.
@@ -126,3 +128,7 @@ Unit tests do not establish compatibility with every provider. Test tool calling
 - [Grafana LLM plugin](https://github.com/grafana/grafana-llm-app)
 - [Grafana app plugin LLM integration](https://grafana.com/developers/plugin-tools/how-to-guides/app-plugins/use-llms-and-mcp)
 - [Official Grafana Assistant](https://grafana.com/grafana/plugins/grafana-assistant-app/)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). Third-party dependencies retain their respective licenses.

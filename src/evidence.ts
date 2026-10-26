@@ -33,7 +33,7 @@ function panels(model: any): any[] {
 function contains(actual: any, expected: any): boolean {
   if (expected === null || typeof expected !== 'object') return actual === expected;
   if (actual === null || typeof actual !== 'object') return false;
-  if (Array.isArray(expected)) return Array.isArray(actual) && expected.every((item, i) => contains(actual[i], item));
+  if (Array.isArray(expected)) return Array.isArray(actual) && actual.length === expected.length && expected.every((item, i) => contains(actual[i], item));
   return Object.entries(expected).every(([key, value]) => contains(actual[key], value));
 }
 export function verifyDashboard(expected: any, actual: any): string[] {
@@ -43,10 +43,16 @@ export function verifyDashboard(expected: any, actual: any): string[] {
   for (const key of ['title', 'description', 'tags', 'templating', 'annotations', 'time', 'refresh', 'timezone', 'timepicker', 'links']) {
     if (expected?.[key] !== undefined && !contains(actual[key], expected[key])) gaps.push(`Saved dashboard ${key} differs.`);
   }
+  if (Array.isArray(expected?.panels)) {
+    for (const actualPanel of panels(actual)) {
+      if (!panels(expected).some(p => p.id !== undefined ? p.id === actualPanel.id : p.title === actualPanel.title)) gaps.push(`Unexpected panel remains: ${actualPanel.title ?? actualPanel.id}`);
+    }
+    if (panels(actual).length !== panels(expected).length) gaps.push('Saved panel count differs.');
+  }
   for (const p of panels(expected)) {
     const found = panels(actual).find(a => p.id !== undefined ? a.id === p.id : a.title === p.title);
     if (!found) { gaps.push(`Missing panel: ${p.title ?? p.id}`); continue; }
-    for (const key of ['title', 'type', 'datasource', 'targets', 'fieldConfig', 'options', 'gridPos']) {
+    for (const key of Object.keys(p)) {
       if (p[key] !== undefined && !contains(found[key], p[key])) gaps.push(`Panel ${p.title ?? p.id}: ${key} differs.`);
     }
   }

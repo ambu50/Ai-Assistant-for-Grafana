@@ -1,3 +1,4 @@
+import { dashboardCreationAccess } from './creationDestinations';
 import { getBackendSrv } from '@grafana/runtime';
 import { applyDashboardPatch } from './evidence';
 
@@ -40,17 +41,7 @@ export class SessionToolClient {
     const api = getBackendSrv();
     const identity = (d: any) => ({ uid: d.uid, name: d.name, type: d.type });
     switch (name) {
-      case 'get_dashboard_creation_access': {
-        const permissions = await api.get<Record<string, string[]>>('/api/access-control/user/permissions');
-        const scopes = [...(permissions['dashboards:create'] || []), ...(permissions['dashboards:write'] || [])];
-        if (typeof args.folderUid === 'string') {
-          const target = args.folderUid || 'general';
-          return { allowed: scopes.some(scope => ['*', 'folders:*', 'folders:uid:*', 'folders:uid:' + target].includes(scope)), folderUid: args.folderUid };
-        }
-        if (scopes.some(scope => ['*', 'folders:*', 'folders:uid:*'].includes(scope))) return { allowed: true, folderUid: '' };
-        const destination = scopes.find(scope => /^folders:uid:[a-zA-Z0-9_-]+$/.test(scope));
-        return destination ? { allowed: true, folderUid: destination.slice('folders:uid:'.length).replace(/^general$/, '') } : { allowed: false };
-      }
+      case 'get_dashboard_creation_access': return dashboardCreationAccess(api, typeof args.folderUid === 'string' ? args.folderUid : undefined);
       case 'search_dashboards': return api.get('/api/search', { type: 'dash-db', query: String(args.query || ''), page: Number(args.page) || 1, limit: 100 });
       case 'get_dashboard_by_uid': return api.get(`/api/dashboards/uid/${identifier(args.uid, 'dashboard UID')}`);
       case 'list_datasources': return (await api.get<any[]>('/api/datasources')).map(identity);

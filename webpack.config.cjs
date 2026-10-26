@@ -6,7 +6,7 @@ module.exports = {
   externals: [/^@grafana\/(data|runtime|ui)$/, 'react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'rxjs'],
   resolve: { extensions: ['.ts', '.tsx', '.js'] },
   module: { rules: [{ test: /\.tsx?$/, use: 'ts-loader', exclude: /node_modules/ }, { test: /\.css$/, use: ['style-loader', 'css-loader'] }] },
-  plugins: [new CopyPlugin({ patterns: [{ from: 'src/plugin.json', to: 'plugin.json' }, { from: 'src/img', to: 'img' }, { from: 'README.md', to: 'README.md' }] })],
+  plugins: [new CopyPlugin({ patterns: [{ from: 'src/plugin.json', to: 'plugin.json' }, { from: 'src/img', to: 'img' }, { from: 'README.md', to: 'README.md' }, { from: 'LICENSE', to: 'LICENSE', toType: 'file' }] })],
   optimization: { splitChunks: false },
   devtool: 'source-map',
 };

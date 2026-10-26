@@ -18,3 +18,9 @@ describe('copy offer acceptance', () => {
     expect(acceptedCopyOffer([{ role: 'user', content: 'ok' }])).toBeUndefined();
   });
 });
+it('accepts a folder selection from the offer without changing saved history', () => {
+  const offer = { role: 'assistant', content: 'Offer', copyOffer: { sourceUid: 's', sourceTitle: 'S', request: 'Remove panel', folderUid: 'a', destinations: [{ uid: 'a', title: 'A' }, { uid: 'b', title: 'B' }] } };
+  expect(acceptedCopyOffer([offer, { role: 'user', content: 'ok', copyFolderUid: 'b' }])?.folderUid).toBe('b');
+  expect(offer.copyOffer.folderUid).toBe('a');
+  expect(acceptedCopyOffer([offer, { role: 'user', content: 'ok', copyFolderUid: 'other' }])).toBeUndefined();
+});

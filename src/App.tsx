@@ -1,3 +1,4 @@
+import { CopyOfferAction } from './CopyOfferAction';
 import { DatasourcePicker } from './DatasourcePicker';
 import type { DatasourceContext } from './datasourceContext';
 import React, { useEffect, useRef, useState } from 'react';
@@ -142,9 +143,9 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
   }
   const stop = () => stopRun();
 
-  function send(text: string) {
+  function send(text: string, copyFolderUid?: string) {
     if (!text.trim() || (run && run.running)) { return; }
-    const next: ChatMessage[] = [...messages, { role: 'user', content: text.trim() }];
+    const next: ChatMessage[] = [...messages, { role: 'user', content: text.trim(), ...(copyFolderUid !== undefined ? { copyFolderUid } : {}) }];
     setMessages(next); setDraft(''); setPicker(null); setSourcePicker(false); clearRunError();
     beginRun({ conversationId: activeId, messages: next, context: JSON.stringify({ timeWindow: effectiveViewContext?.from && effectiveViewContext?.to ? { from: effectiveViewContext.from, to: effectiveViewContext.to } : undefined, now: new Date().toISOString(), notes: context, dashboard: effectiveViewContext, datasource: attachedDatasource }), effort: 'off' });
   }
@@ -179,7 +180,7 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
         {messages.filter(m => !(m.checkpoint && progress)).map((m, i) => <article key={i} className={`ai-message ${m.role}`}>
           <div className="ai-message-role">{m.role === 'assistant' ? '✦ AI Assistant' : 'You'}</div>
           {m.plan && <TaskChecklist plan={m.plan} />}
-          {m.copyOffer && !busy && i === messages.length - 1 && <button type="button" className="ai-resume" onClick={() => send('ok')}>Create modified copy</button>}
+          {m.copyOffer && !busy && i === messages.length - 1 && <CopyOfferAction offer={m.copyOffer} onAccept={folderUid => send('ok', folderUid)} />}
           {m.plan && !m.plan.blockedReason && !/Grafana denied this operation for the signed-in user/.test(m.content) && !m.copyOffer && !busy && i === messages.length - 1 && m.plan.steps.some(step => step.status !== 'completed' && step.status !== 'skipped' && !step.resolvedBy) && <button type="button" className="ai-resume" onClick={() => send('Continue the unfinished task from the previous checkpoint. Inspect current resources before any mutations; preserve completed work and do not blindly repeat writes.')}>Continue unfinished task</button>}
           {m.steps && m.steps.length > 0 && (
             <details className="ai-steps-details">

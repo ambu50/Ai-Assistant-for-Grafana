@@ -27,7 +27,7 @@ These checks are not an independent security audit. Other Grafana plugins and en
 
 ## Modified copies and authorization preflight
 
-Edit requests for an attached dashboard check native save/edit metadata before contacting the model. Later-resolved edits refresh permissions before validating mutation payloads. Final saves remain server-authorized.
+All requests with an attached dashboard check native save/edit metadata before contacting the model and receive capabilities regardless of language. Read-only investigation remains available. Later-resolved edits refresh permissions before validating mutation payloads. Final saves remain server-authorized.
 
 A read-only source may produce a copy offer only after the current user's creation scopes identify a permitted destination. Dashboard-specific write permission alone is not creation permission. Accepting the offer with the button or an affirmative reply authorizes the offered source and requested changes. The destination is rechecked before model work; a denial is not retried through another identity or folder.
 

@@ -1,3 +1,5 @@
+import type { CopyOffer } from './copyConsent';
+import type { CopyDestination } from './creationDestinations';
 import { acceptedCopyOffer } from './copyConsent';
 import { SessionToolClient } from './sessionTools';
 import { llm, mcp } from '@grafana/llm';
@@ -9,7 +11,7 @@ import { applyDashboardPatch, dashboardModel, mergeDashboardEdit, preservedPanel
 
 export type DashboardRef = { uid: string; title?: string; url?: string };
 export type ToolStep = { id: string; name: string; status: 'running' | 'completed' | 'failed'; description: string };
-export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean; copyOffer?: { sourceUid: string; sourceTitle: string; request: string; folderUid?: string } };
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; dashboards?: DashboardRef[]; steps?: ToolStep[]; plan?: TaskPlan; checkpoint?: boolean; copyFolderUid?: string; copyOffer?: CopyOffer };
 
 // Familiar reasoning control surfaced in the UI. To stay provider-agnostic, effort maps ONLY
 // to the standard, widely-supported `reasoning_effort` field. No provider-specific kwargs
@@ -192,7 +194,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
     try {
       const access = unwrapResult(await untilStopped(client!.callTool({ name: 'get_dashboard_creation_access', arguments: folderUid === undefined ? {} : { folderUid } }), signal)) as any;
       check();
-      return access?.allowed === true && typeof access.folderUid === 'string' ? access as { allowed: true; folderUid: string } : undefined;
+      return access?.allowed === true && typeof access.folderUid === 'string' ? access as { allowed: true; folderUid: string; folderTitle?: string; destinations?: CopyDestination[] } : undefined;
     } catch { check(); return undefined; }
   };
   const offerCopy = async (uid: string, title: string) => {
@@ -206,7 +208,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
     }
     execution.state.blockedReason = 'The original dashboard is read-only for your Grafana account.';
     execution.interrupt(execution.state.blockedReason);
-    onText(`You can view **${title}**, but you do not have permission to edit it. The original was not changed.\n\nYou have permission to create a separate copy in a destination folder. I can apply your requested changes to that copy, keeping the original unchanged.`, undefined, steps, { sourceUid: uid, sourceTitle: title, request: lastPrompt, folderUid: destination.folderUid });
+    onText(`You can view **${title}**, but you do not have permission to edit it. The original was not changed.\n\nYou can create a separate copy in **${destination.folderTitle || destination.folderUid || 'General'}**. Choose the destination below or reply “ok” to use it. I can apply your requested changes to that copy, keeping the original unchanged.`, undefined, steps, { sourceUid: uid, sourceTitle: title, request: lastPrompt, folderUid: destination.folderUid, folderTitle: destination.folderTitle, destinations: destination.destinations });
   };
   let stage = 'Checking dashboard permissions';
   try {
@@ -222,7 +224,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
     }
     let attachedUid: unknown;
     try { const parsed = JSON.parse(context); attachedUid = parsed.dashboard?.dashboardUid; } catch { /* No structured dashboard context. */ }
-    if (!copyConsent && typeof attachedUid === 'string' && /\b(remove|delete|edit|modify|change|update|replace|add|rename|fix)\b/i.test(lastPrompt) && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) {
+    if (typeof attachedUid === 'string') {
       onActivity('Checking dashboard edit permission…');
       execution.state.summary = 'Check dashboard authorization';
       execution.state.steps[0].description = 'Check whether your Grafana account can edit the selected dashboard';
@@ -231,7 +233,9 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
       const inspected = unwrapResult(await untilStopped(client.callTool({ name: 'get_dashboard_by_uid', arguments: { uid: attachedUid } }), signal)) as any;
       check();
       if (inspected?.dashboard?.uid !== attachedUid || !inspected?.meta) throw new Error('Could not verify the selected dashboard permissions. No changes were attempted.');
-      if (inspected.meta.canSave !== true || inspected.meta.canEdit === false) {
+      const canEdit = inspected.meta.canSave === true && inspected.meta.canEdit !== false;
+      messages.push({ role: 'system', content: 'Native Grafana capability check for the attached dashboard: ' + JSON.stringify({ uid: attachedUid, canEdit, canSave: inspected.meta.canSave === true }) + '. These permissions apply regardless of the language or wording of the request. If read-only, do not attempt an update; explain the restriction. Read-only investigation is permitted. A modified copy requires user consent and a verified destination.' });
+      if (!copyConsent && !canEdit && /\b(remove|delete|edit|modify|change|update|replace|add|rename|fix)\b/i.test(lastPrompt) && !/\b(copy|duplicate|clone)\b/i.test(lastPrompt)) {
         await offerCopy(attachedUid, String(inspected.dashboard.title || attachedUid));
         return;
       }
@@ -239,7 +243,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
       execution.state.steps[0].description = 'Answer the request using available evidence';
       execution.state.steps[0].kind = 'respond';
       execution.emit();
-      messages.push({ role: 'system', content: 'The selected dashboard was inspected before planning. The signed-in user currently has save permission. Recheck before saving; preserve unrelated content. Dashboard UID: ' + JSON.stringify(attachedUid) });
+      if (canEdit) messages.push({ role: 'system', content: 'The selected dashboard currently permits saving. Recheck before saving and preserve unrelated content.' });
     }
     stage = 'Checking LLM availability';
     onActivity('Checking model connection…');
@@ -452,7 +456,7 @@ export async function runAgent(history: ChatMessage[], context: string, signal: 
             if (dashRef && !createdDashboards.some(d => d.uid === dashRef.uid)) createdDashboards.push(dashRef);
           }
           const modelOutput = call.function.name === 'create_dashboard_copy' ? { ...(output as object), expectedDashboard: undefined } : output;
-          result = JSON.stringify(modelOutput).slice(0, 24000);
+          result = JSON.stringify(modelOutput);
           step.status = 'completed';
           step.description = `Completed ${call.function.name}`;
           execution.endAction(stepId);

@@ -378,3 +378,27 @@ it('rechecks copy creation permission on ok before contacting the model', async 
   expect(mocks.chat).not.toHaveBeenCalled();
   expect(text).toHaveBeenCalledWith(expect.stringContaining('no verified permission'), undefined, []);
 });
+it('passes the full tool result to the model beyond the former 24k boundary', async () => {
+  const result = { items: [{ title: 'x'.repeat(50000), uid: 'end-marker' }] };
+  mocks.call.mockResolvedValue(result);
+  mocks.chat.mockResolvedValueOnce(tool('search_dashboards')).mockResolvedValueOnce(answer);
+  await runAgent([{ role: 'user', content: 'Search dashboards' }], '', new AbortController().signal, vi.fn(), vi.fn());
+  const message = mocks.chat.mock.calls[1][0].messages.find((m: any) => m.role === 'tool');
+  expect(JSON.parse(message.content)).toEqual(result);
+  expect(message.content.length).toBeGreaterThan(50000);
+});
+it.each(['لماذا هذه اللوحة لا تعرض بيانات؟', '¿Por qué no hay datos?', 'Explain this dashboard'])('checks capabilities before a read-only question in any language: %s', async question => {
+  mocks.call.mockResolvedValue({ dashboard: { uid: 'protected', title: 'Source', panels: [] }, meta: { canSave: false, canEdit: false } });
+  mocks.chat.mockResolvedValueOnce(answer);
+  await runAgent([{ role: 'user', content: question }], '{"dashboard":{"dashboardUid":"protected"}}', new AbortController().signal, vi.fn(), vi.fn());
+  expect(mocks.call.mock.invocationCallOrder[0]).toBeLessThan(mocks.chat.mock.invocationCallOrder[0]);
+  expect(mocks.chat.mock.calls[0][0].messages).toContainEqual(expect.objectContaining({ role: 'system', content: expect.stringContaining('"canEdit":false') }));
+});
+it('enforces the user-selected copy folder and rechecks it before model work', async () => {
+  mocks.list.mockResolvedValue({ tools: [{ name: 'create_dashboard_copy' }, { name: 'get_dashboard_by_uid' }] });
+  mocks.call.mockImplementation(async ({ name }) => name === 'get_dashboard_creation_access' ? { allowed: true, folderUid: 'users', folderTitle: 'Users' } : {});
+  mocks.chat.mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'copy', type: 'function', function: { name: 'create_dashboard_copy', arguments: '{"sourceUid":"source","folderUid":"wrong"}' } }] } }] }).mockResolvedValueOnce(answer);
+  await runAgent([{ role: 'assistant', content: 'Offer', copyOffer: { sourceUid: 'source', sourceTitle: 'Source', request: 'Remove panel 7', folderUid: 'personal', destinations: [{ uid: 'personal', title: 'Personal' }, { uid: 'users', title: 'Users' }] } }, { role: 'user', content: 'ok', copyFolderUid: 'users' }], '', new AbortController().signal, vi.fn(), vi.fn());
+  expect(mocks.call).toHaveBeenCalledWith({ name: 'get_dashboard_creation_access', arguments: { folderUid: 'users' } });
+  expect(mocks.call).toHaveBeenCalledWith({ name: 'create_dashboard_copy', arguments: { sourceUid: 'source', folderUid: 'users' } });
+});
