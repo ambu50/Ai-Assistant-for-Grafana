@@ -1,0 +1,62 @@
+{
+  "type": "app",
+  "name": "AI Assistant",
+  "id": "ai-assistant-app",
+  "preload": true,
+  "info": {
+    "description": "An observability assistant powered by Grafana LLM with session-authenticated Grafana tools.",
+    "author": {
+      "name": "AI Assistant"
+    },
+    "keywords": [
+      "ai",
+      "assistant",
+      "observability"
+    ],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "1.0.0",
+    "updated": "2026-10-26"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=12.0.0",
+    "plugins": [
+      {
+        "id": "grafana-llm-app",
+        "type": "app",
+        "name": "LLM"
+      }
+    ]
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Assistant",
+      "path": "/a/ai-assistant-app",
+      "addToNav": true,
+      "defaultNav": true
+    }
+  ],
+  "extensions": {
+    "addedLinks": [
+      {
+        "targets": [
+          "grafana/dashboard/panel/menu"
+        ],
+        "title": "Ask AI Assistant",
+        "description": "Chat about this panel and dashboard without leaving the dashboard"
+      },
+      {
+        "targets": [
+          "grafana/commandpalette/action"
+        ],
+        "title": "AI Assistant chat",
+        "description": "Open an assistant conversation with the current dashboard as context"
+      }
+    ]
+  }
+}

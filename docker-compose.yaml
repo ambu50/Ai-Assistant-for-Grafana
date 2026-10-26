@@ -1,0 +1,14 @@
+services:
+  grafana:
+    image: grafana/grafana:12.3.0
+    ports:
+      - '3000:3000'
+    environment:
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: ai-assistant-app
+      GF_INSTALL_PLUGINS: grafana-llm-app
+    volumes:
+      - ./dist:/var/lib/grafana/plugins/ai-assistant-app:ro
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+volumes:
+  grafana-data:

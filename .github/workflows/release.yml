@@ -1,0 +1,89 @@
+name: Release build
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build (for example v1.0.0)
+        required: true
+        type: string
+  # Backfill the current published version when release tooling is introduced or repaired.
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - scripts/package_plugin.py
+permissions:
+  contents: read
+concurrency:
+  group: release-build-${{ github.event.release.tag_name || inputs.tag || 'current' }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve existing release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.tag || (github.ref_type == 'tag' && github.ref_name) }}
+        run: |
+          tag="$REQUESTED_TAG"
+          if [ -z "$tag" ]; then
+            tag="v$(node -p "require('./package.json').version")"
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "Invalid release tag" >&2
+            exit 1
+          fi
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null; then
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "No published release for $tag; nothing to backfill."
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Check out exact release source
+        if: steps.release.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          path: release-source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.release.outputs.exists == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: release-source/package-lock.json
+      - name: Install and validate tagged source
+        if: steps.release.outputs.exists == 'true'
+        working-directory: release-source
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Package installable plugin
+        if: steps.release.outputs.exists == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 scripts/package_plugin.py --source release-source/dist --tag "$RELEASE_TAG"
+      - name: Attach ZIP and checksum to existing release
+        if: steps.release.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" release/*.zip release/*.sha256 --repo "$GITHUB_REPOSITORY" --clobber
