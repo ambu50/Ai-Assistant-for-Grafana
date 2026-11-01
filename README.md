@@ -52,7 +52,7 @@ Download `ai-assistant-app-<version>.zip` from the repository's **Releases** pag
 
 Extract the ZIP into Grafana's plugin directory. It contains a single `ai-assistant-app/` directory with `plugin.json`, `module.js`, lazy-loaded bundles, and the license. Install/configure the LLM plugin and enable AI Assistant as described below. Release builds are unsigned; they require the same explicit plugin allowlist as development builds until signing is configured.
 
-Publishing a release triggers **Release build**, which validates and builds the exact tag and attaches the ZIP and checksum. The workflow can also be run manually with an existing release tag. Changes to release tooling on `main` backfill the published version matching `package.json`. Node.js 22 and Python 3 are used for packaging. Locally, run `npm run package`; outputs go into ignored `release/`.
+Pushing a version bump to `main` triggers **Release build** automatically. Keep the versions in `package.json`, `package-lock.json`, and `src/plugin.json` in sync. The workflow validates the versioned source, runs tests, builds and packages the plugin, and then creates the tag and GitHub release with the ZIP and checksum. A version with both assets already published is skipped; use the manual workflow to rebuild it intentionally. Manually published releases and pushed version tags also trigger packaging. Node.js 22 and Python 3 are used for packaging. Locally, run `npm run package`; outputs go into ignored `release/`.
 
 ## Existing Grafana installation
 
