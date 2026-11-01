@@ -1,3 +1,6 @@
+import { useTheme2 } from '@grafana/ui';
+import { assistantTheme } from './theme';
+import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { CopyOfferAction } from './CopyOfferAction';
 import { DatasourcePicker } from './DatasourcePicker';
 import type { DatasourceContext } from './datasourceContext';
@@ -18,6 +21,7 @@ import { DashboardPicker } from './DashboardPicker';
 import { dashboardMention, selectedDashboard, DashboardChoice } from './dashboardSearch';
 
 export function App({ compact = false, viewContext }: Partial<AppRootProps> & { compact?: boolean; viewContext?: DashboardContext }) {
+  const theme = useTheme2();
   const [initial] = useState(() => {
     const saved = loadSavedState();
     if (!viewContext || getRun()?.running) return saved;
@@ -149,7 +153,7 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
     setMessages(next); setDraft(''); setPicker(null); setSourcePicker(false); clearRunError();
     beginRun({ conversationId: activeId, messages: next, context: JSON.stringify({ timeWindow: effectiveViewContext?.from && effectiveViewContext?.to ? { from: effectiveViewContext.from, to: effectiveViewContext.to } : undefined, now: new Date().toISOString(), notes: context, dashboard: effectiveViewContext, datasource: attachedDatasource }), effort: 'off' });
   }
-  return <div className={`ai-app${compact ? ' ai-embedded' : ''}${!messages.length ? ' ai-empty' : ''}`}>
+  return <div style={assistantTheme(theme)} data-theme={theme.colors.mode} className={`ai-app${compact ? ' ai-embedded' : ''}${!messages.length ? ' ai-empty' : ''}`}>
     <aside className="ai-sidebar">
       <div className="ai-brand"><span className="ai-mark">✦</span> AI Assistant</div>
       <button className="ai-new" disabled={busy} onClick={startNewConversation}>＋ New conversation</button>
@@ -218,39 +222,8 @@ export function App({ compact = false, viewContext }: Partial<AppRootProps> & { 
                   </a>
                 );
               },
-              code: ({ className, children, ...props }) => {
-                const match = /language-(\w+)/.exec(className || '');
-                const isBlock = Boolean(match) || String(children).includes('\n');
-                if (!isBlock) {
-                  return <code className={className} {...props}>{children}</code>;
-                }
-                const codeText = String(children).replace(/\n$/, '');
-                const lang = match ? match[1] : '';
-                const isQuery = /promql|logql|traceql|sql/i.test(lang);
-                const exploreUrl = isQuery ? `${config.appSubUrl}/explore` : null;
-                return (
-                  <div className="ai-code-block">
-                    <div className="ai-code-header">
-                      <span className="ai-code-lang">{lang || 'snippet'}</span>
-                      <div className="ai-code-actions">
-                        {exploreUrl && (
-                          <a href={exploreUrl} target="_blank" rel="noreferrer" className="ai-code-btn">
-                            Explore ↗
-                          </a>
-                        )}
-                        <button
-                          type="button"
-                          className="ai-code-btn"
-                          onClick={() => void navigator.clipboard?.writeText(codeText)}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    </div>
-                    <pre><code className={className} {...props}>{children}</code></pre>
-                  </div>
-                );
-              },
+              pre: MarkdownCodeBlock,
+              code: ({ className, children }) => <code className={className}>{children}</code>,
             }}
           >
             {normalizeMarkdownTables(m.content)}

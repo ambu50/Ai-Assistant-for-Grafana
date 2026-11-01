@@ -1,6 +1,6 @@
 {
   "name": "ai-assistant-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -18,7 +18,8 @@
     "react-dom": "18.3.1",
     "react-markdown": "9.1.0",
     "remark-gfm": "4.0.1",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "@grafana/ui": "12.4.13"
   },
   "devDependencies": {
     "@types/react": "18.3.31",
