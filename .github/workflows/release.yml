@@ -52,10 +52,10 @@ jobs:
             echo "source_ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           fi
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" > "$RUNNER_TEMP/existing-release.json"; then
-            archive="ai-assistant-app-${tag#v}.zip"
-            complete=$(jq --arg archive "$archive" '([.assets[].name] | index($archive) != null and index($archive + ".sha256") != null) and (.draft == false)' "$RUNNER_TEMP/existing-release.json")
+            archive="ai-assistant-app-${tag#v}"
+            complete=$(jq --arg archive "$archive" '([.assets[].name] | index($archive + ".zip") != null and index($archive + ".zip.sha256") != null and index($archive + ".tar.gz") != null and index($archive + ".tar.gz.sha256") != null) and (.draft == false)' "$RUNNER_TEMP/existing-release.json")
             if [ "$complete" = true ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
-              echo "$tag already has its ZIP and checksum; skipping."
+              echo "$tag already has its ZIP, tar.gz and checksums; skipping."
               echo "build=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -94,7 +94,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'test_*.py'
           python3 scripts/package_plugin.py --source release-source/dist --tag "$RELEASE_TAG"
-      - name: Publish release with ZIP and checksum
+      - name: Publish release with ZIP, tar.gz and checksums
         if: steps.release.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,11 +102,11 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release/*.zip release/*.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$RELEASE_TAG" release/*.zip release/*.tar.gz release/*.sha256 --repo "$GITHUB_REPOSITORY" --clobber
           else
             extra=()
             if [[ "$RELEASE_TAG" == *-* ]]; then extra+=(--prerelease); fi
-            gh release create "$RELEASE_TAG" release/*.zip release/*.sha256 \
+            gh release create "$RELEASE_TAG" release/*.zip release/*.tar.gz release/*.sha256 \
               --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "$RELEASE_TAG" \
               --generate-notes "${extra[@]}"
           fi

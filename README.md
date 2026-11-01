@@ -48,7 +48,7 @@ For development, run `npm run dev` and refresh Grafana after the rebuild.
 
 ## Download a release build
 
-Download `ai-assistant-app-<version>.zip` from the repository's **Releases** page. GitHub's automatic **Source code** archives contain source, not an installable plugin. The adjacent `.zip.sha256` file lets you verify the download with `sha256sum -c <filename>.zip.sha256` (or `shasum -a 256 -c <filename>.zip.sha256` on macOS).
+Download `ai-assistant-app-<version>.zip` or `ai-assistant-app-<version>.tar.gz` from the repository's **Releases** page. GitHub's automatic **Source code** archives contain source, not an installable plugin. Each archive has an adjacent `.sha256` file that lets you verify the download with `sha256sum -c <filename>.zip.sha256` (or `shasum -a 256 -c <filename>.zip.sha256` on macOS).
 
 Extract the ZIP into Grafana's plugin directory. It contains a single `ai-assistant-app/` directory with `plugin.json`, `module.js`, lazy-loaded bundles, and the license. Install/configure the LLM plugin and enable AI Assistant as described below. Release builds are unsigned; they require the same explicit plugin allowlist as development builds until signing is configured.
 
@@ -142,3 +142,5 @@ Unit tests do not establish compatibility with every provider. Test tool calling
 Licensed under the [Apache License 2.0](LICENSE). Third-party dependencies retain their respective licenses.
 
 MySQL connectivity checks execute `SELECT 1 AS connection_test` through Grafana using the signed-in user. The test reports server errors and verifies the returned value. Native backend queries are available through `query_datasource`, with the datasource identity resolved through Grafana. SQL diagnostics use the configured database account; use a read-only database account for investigations. Datasource health checks are also available. Support depends on each installed datasource plugin and its native query model.
+
+For tar.gz installations, verify the checksum, then extract with `tar -xzf ai-assistant-app-<version>.tar.gz -C <grafana-plugins-directory>`. Both formats contain the same compiled plugin under `ai-assistant-app/`.

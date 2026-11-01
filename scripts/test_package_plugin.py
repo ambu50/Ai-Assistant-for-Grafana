@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import zipfile
+import tarfile
 from package_plugin import package_plugin
 
 
@@ -21,10 +22,16 @@ class PackageTests(unittest.TestCase):
         (self.root / 'private.env').write_text('never ship')
 
     def test_archive_has_installable_root_and_all_built_chunks_only(self):
-        archive, checksum = package_plugin(self.dist, self.root / 'release', 'v1.0.0')
+        archive, checksum, tar_archive, tar_checksum = package_plugin(self.dist, self.root / 'release', 'v1.0.0')
         with zipfile.ZipFile(archive) as bundle:
             self.assertEqual(set(bundle.namelist()), {'ai-assistant-app/plugin.json', 'ai-assistant-app/module.js', 'ai-assistant-app/chunk.js', 'ai-assistant-app/LICENSE'})
             self.assertEqual(bundle.read('ai-assistant-app/chunk.js'), b'lazy chat')
+        with tarfile.open(tar_archive, 'r:gz') as bundle, zipfile.ZipFile(archive) as zip_bundle:
+            self.assertEqual(set(bundle.getnames()), set(zip_bundle.namelist()))
+            for member in bundle.getmembers():
+                self.assertTrue(member.isfile())
+                self.assertEqual(bundle.extractfile(member).read(), zip_bundle.read(member.name))
+        self.assertEqual(tar_checksum.read_text(), hashlib.sha256(tar_archive.read_bytes()).hexdigest() + '  ' + tar_archive.name + '\n')
         self.assertEqual(checksum.read_text(), hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
 
     def test_rejects_tag_mismatch_before_writing_archive(self):

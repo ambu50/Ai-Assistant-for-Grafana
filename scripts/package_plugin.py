@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import zipfile
+import tarfile
 
 
 def package_plugin(source, output, tag=None):
@@ -31,7 +32,17 @@ def package_plugin(source, output, tag=None):
             raise ValueError('Archive integrity check failed.')
     checksum = archive.with_suffix('.zip.sha256')
     checksum.write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
-    return archive, checksum
+    tar_archive = output / f'{plugin_id}-{version}.tar.gz'
+    with tarfile.open(tar_archive, 'w:gz') as bundle:
+        for path in files:
+            bundle.add(path, arcname=str(Path(plugin_id) / path.relative_to(source)), recursive=False)
+    with tarfile.open(tar_archive, 'r:gz') as bundle:
+        for member in bundle.getmembers():
+            with bundle.extractfile(member) as content:
+                content.read()
+    tar_checksum = Path(str(tar_archive) + '.sha256')
+    tar_checksum.write_text(hashlib.sha256(tar_archive.read_bytes()).hexdigest() + '  ' + tar_archive.name + '\n')
+    return archive, checksum, tar_archive, tar_checksum
 
 
 if __name__ == '__main__':
