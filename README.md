@@ -2,7 +2,7 @@
 
 A Grafana app for investigating metrics, finding dashboards, and making dashboard changes through conversational tasks. Model completions use [grafana-llm-app](https://github.com/grafana/grafana-llm-app); resource tools use native Grafana APIs as the signed-in user.
 
-This is an independent project, not the official Grafana Assistant. Current version: **1.0.1**. The running version is visible in the app.
+This is an independent project, not the official Grafana Assistant. Current version: **1.0.2**. The running version is visible in the app.
 
 ## Features
 
@@ -140,3 +140,5 @@ Unit tests do not establish compatibility with every provider. Test tool calling
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE). Third-party dependencies retain their respective licenses.
+
+MySQL connectivity checks execute `SELECT 1 AS connection_test` through Grafana using the signed-in user. The test reports server errors and verifies the returned value. Arbitrary MySQL SQL is not currently supported.

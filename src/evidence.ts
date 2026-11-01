@@ -11,12 +11,13 @@ export function unwrapResult(output: unknown): any {
   return output;
 }
 export function queryEvidence(name: string, args: Record<string, unknown>, output: unknown, failed: boolean): QueryEvidence | undefined {
-  const expr = args.expr ?? args.query ?? args.expression ?? args.promql ?? args.logql;
+  const expr = args.expr ?? args.query ?? args.expression ?? args.promql ?? args.logql ?? (name === 'test_mysql_query' ? 'SELECT 1 AS connection_test' : undefined);
   if (!/query/i.test(name) || typeof expr !== 'string') return;
   let data: QueryEvidence['data'] = 'unknown';
   if (!failed) {
     const result = unwrapResult(output);
     const values = result?.data?.result ?? result?.result ?? (Array.isArray(result) ? result : undefined);
+    if (name === 'test_mysql_query' && result?.verified === true) data = 'present';
     if (Array.isArray(values)) data = values.length ? 'present' : 'empty';
   }
   const range = Object.fromEntries(Object.entries(args).filter(([key]) => /^(start|end|from|to|time|step|range|timeRange)$/i.test(key)));

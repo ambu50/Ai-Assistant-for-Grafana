@@ -1,6 +1,6 @@
 # AI Assistant deployment
 
-Version 1.0.1 uses plugin ID `ai-assistant-app` and route `/a/ai-assistant-app`.
+Version 1.0.2 uses plugin ID `ai-assistant-app` and route `/a/ai-assistant-app`.
 
 Build with `npm ci`, `npm run typecheck`, `npm test`, and `npm run build`.
 Copy `dist/` into Grafana's plugin directory under `ai-assistant-app`.

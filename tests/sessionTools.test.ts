@@ -92,3 +92,26 @@ it('does not substitute a different folder when an offered destination loses per
   api.get.mockResolvedValue({ 'dashboards:create': ['folders:uid:other'] });
   await expect(client.callTool({ name: 'get_dashboard_creation_access', arguments: { folderUid: 'personal' } })).resolves.toEqual({ allowed: false, folderUid: 'personal' });
 });
+
+describe('MySQL test queries', () => {
+  it('executes fixed SQL with the session and verifies returned data', async () => {
+    api.get.mockResolvedValue({ uid: 'sql', type: 'mysql', password: 'secret' });
+    api.post.mockResolvedValue({ results: { A: { frames: [{ data: { values: [[1]] } }] } } });
+    await expect(client.callTool({ name: 'test_mysql_query', arguments: { datasourceUid: 'sql', rawSql: 'DROP TABLE users' } })).resolves.toMatchObject({ verified: true });
+    expect(api.post).toHaveBeenCalledWith('/api/ds/query', expect.objectContaining({ queries: [expect.objectContaining({ datasource: { uid: 'sql', type: 'mysql' }, rawSql: 'SELECT 1 AS connection_test' })] }));
+  });
+  it('propagates authorization failures without another identity', async () => {
+    api.get.mockRejectedValue({ status: 403 });
+    await expect(client.callTool({ name: 'test_mysql_query', arguments: { datasourceUid: 'sql' } })).rejects.toMatchObject({ status: 403 });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+  it.each([{ results: { A: { error: 'Access denied', status: 500 } } }, { results: { A: { frames: [] } } }, {}])('rejects failed or unverified query responses', async result => {
+    api.get.mockResolvedValue({ type: 'grafana-mysql-datasource' }); api.post.mockResolvedValue(result);
+    await expect(client.callTool({ name: 'test_mysql_query', arguments: { datasourceUid: 'sql' } })).rejects.toThrow();
+  });
+  it('rejects other datasource types before querying', async () => {
+    api.get.mockResolvedValue({ type: 'prometheus' });
+    await expect(client.callTool({ name: 'test_mysql_query', arguments: { datasourceUid: 'p' } })).rejects.toThrow('MySQL');
+    expect(api.post).not.toHaveBeenCalled();
+  });
+});

@@ -14,6 +14,7 @@ export const sessionTools = [
   definition('get_datasource_by_uid', 'Read a datasource identity as the signed-in user.', { uid: string }, ['uid']),
   definition('update_dashboard', 'Create or update a classic dashboard, or apply patch operations to an existing dashboard. Grafana enforces the signed-in user permissions on the actual save. Preserve unrelated content.', { uid: string, dashboard: { type: 'object', additionalProperties: true }, operations, folderUid: string, message: string, overwrite: { type: 'boolean' } }),
   definition('create_dashboard_copy', 'Create a new modified copy of a readable dashboard after a copy request or acceptance of a pending copy offer. To remove panels, prefer removePanelIds; it handles nested row panels using the full source without model truncation. Make the modified copy in one save rather than a plain copy followed by edits. Never edit or overwrite the source. Destination creation permissions are enforced by Grafana.', { sourceUid: string, title: string, operations, removePanelIds: { type: 'array', minItems: 1, items: { type: 'integer' }, description: 'Exact panel IDs to remove recursively from the source. Mutually exclusive with operations. All other content is preserved.' }, folderUid: string }, ['sourceUid']),
+  definition('test_mysql_query', 'Test a MySQL datasource by executing SELECT 1 AS connection_test through Grafana as the signed-in user. Use this when asked to check MySQL connectivity or run a test query. The SQL is fixed and does not modify data.', source, ['datasourceUid']),
   definition('query_prometheus', 'Run a PromQL query through Grafana as the signed-in user.', { ...source, expr: string, queryType: { type: 'string', enum: ['instant', 'range'] }, startTime: string, endTime: string, stepSeconds: { type: 'number' } }, ['datasourceUid', 'expr']),
   definition('list_prometheus_label_values', 'Read Prometheus label values using the signed-in user permissions.', { ...source, labelName: string }, ['datasourceUid', 'labelName']),
   definition('list_prometheus_label_names', 'Read Prometheus label names using the signed-in user permissions.', source, ['datasourceUid']),
@@ -96,6 +97,20 @@ export class SessionToolClient {
         // No trust is placed in model-supplied canEdit/canSave, user IDs or roles.
         // POST /api/dashboards/db is the server-side authorization boundary.
         return api.post('/api/dashboards/db', { dashboard, ...(folderUid !== undefined ? { folderUid } : {}), overwrite: args.overwrite === true, message: typeof args.message === 'string' ? args.message : 'AI Assistant dashboard update' });
+      }
+      case 'test_mysql_query': {
+        const uid = identifier(args.datasourceUid, 'datasource UID');
+        const datasource = await api.get(`/api/datasources/uid/${uid}`);
+        if (!['mysql', 'grafana-mysql-datasource'].includes(datasource.type)) throw new Error('This test query requires a MySQL datasource.');
+        const result = await api.post('/api/ds/query', {
+          from: 'now-5m', to: 'now',
+          queries: [{ refId: 'A', datasource: { uid, type: datasource.type }, rawSql: 'SELECT 1 AS connection_test', format: 'table', rawQuery: true }],
+        });
+        const response = result?.results?.A;
+        if (response?.error || Number(response?.status) >= 400) throw new Error(String(response.error || `MySQL query failed (${response.status}).`));
+        const values = response?.frames?.flatMap((frame: any) => frame.data?.values?.flat() || []);
+        if (!values?.some((value: unknown) => value === 1 || value === '1')) throw new Error('MySQL test returned no expected connection_test value; connectivity was not verified.');
+        return { datasourceUid: uid, query: 'SELECT 1 AS connection_test', verified: true, results: result.results };
       }
       case 'query_prometheus': {
         const uid = identifier(args.datasourceUid, 'datasource UID');
