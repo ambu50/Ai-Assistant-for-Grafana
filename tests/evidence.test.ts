@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { verifyDashboard } from '../src/evidence';
+import { verifyDashboard, queryEvidence } from '../src/evidence';
 describe('saved dashboard removal verification', () => {
   const retained = { id: 2, title: 'CPU', type: 'stat', targets: [{ expr: 'up' }], transformations: [{ id: 'reduce' }] };
   it('rejects a removed panel that is still present, including nested rows', () => {
@@ -16,4 +16,11 @@ describe('saved dashboard removal verification', () => {
     expect(verifyDashboard({ panels: [retained] }, { panels: [{ ...retained, transformations: [] }] })).not.toEqual([]);
     expect(verifyDashboard({ panels: [retained] }, { panels: [{ ...retained, targets: [...retained.targets, { expr: 'unrequested' }] }] })).not.toEqual([]);
   });
+});
+
+it('records native SQL queries and distinguishes rows from empty results', () => {
+  const args = { datasourceUid: 'sql', query: { rawSql: 'SELECT 1' }, from: 'now-5m', to: 'now' };
+  expect(queryEvidence('query_datasource', args, { results: { A: { frames: [{ data: { values: [[1]] } }] } } }, false)).toMatchObject({ expression: 'SELECT 1', datasource: 'sql', data: 'present', status: 'success' });
+  expect(queryEvidence('query_datasource', args, { results: { A: { frames: [] } } }, false)).toMatchObject({ data: 'empty' });
+  expect(queryEvidence('query_datasource', args, undefined, true)).toMatchObject({ data: 'unknown', status: 'error' });
 });

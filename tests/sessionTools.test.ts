@@ -115,3 +115,25 @@ describe('MySQL test queries', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 });
+
+describe('native backend datasource queries', () => {
+  it.each(['mysql', 'grafana-postgresql-datasource', 'mssql', 'loki', 'influxdb', 'elasticsearch', 'tempo', 'grafana-testdata-datasource'])('uses the real %s identity and preserves the native query target', async type => {
+    api.get.mockResolvedValue({ type, url: 'secret' });
+    api.post.mockResolvedValue({ results: { A: { frames: [] } } });
+    await client.callTool({ name: 'query_datasource', arguments: { datasourceUid: 'source', query: { expr: 'native' }, from: 'now-5m', to: 'now' } });
+    expect(api.post).toHaveBeenCalledWith('/api/ds/query', { from: 'now-5m', to: 'now', queries: [{ expr: 'native', refId: 'A', datasource: { uid: 'source', type } }] });
+  });
+  it.each(['datasource', 'url', 'headers', 'token'])('rejects %s overrides', async key => {
+    await expect(client.callTool({ name: 'query_datasource', arguments: { datasourceUid: 'source', query: { [key]: 'override' } } })).rejects.toThrow('not allowed');
+    expect(api.post).not.toHaveBeenCalled();
+  });
+  it('reports backend errors returned in an HTTP-success response', async () => {
+    api.get.mockResolvedValue({ type: 'mysql' }); api.post.mockResolvedValue({ results: { A: { error: 'SQL syntax error' } } });
+    await expect(client.callTool({ name: 'query_datasource', arguments: { datasourceUid: 'source', query: { rawSql: 'SELECT 1' } } })).rejects.toThrow('SQL syntax error');
+  });
+  it('runs the native health check with no alternate identity', async () => {
+    api.get.mockRejectedValue({ status: 403 });
+    await expect(client.callTool({ name: 'check_datasource_health', arguments: { datasourceUid: 'source' } })).rejects.toMatchObject({ status: 403 });
+    expect(api.get).toHaveBeenCalledExactlyOnceWith('/api/datasources/uid/source/health');
+  });
+});

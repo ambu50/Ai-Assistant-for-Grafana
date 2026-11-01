@@ -14,6 +14,8 @@ export const sessionTools = [
   definition('get_datasource_by_uid', 'Read a datasource identity as the signed-in user.', { uid: string }, ['uid']),
   definition('update_dashboard', 'Create or update a classic dashboard, or apply patch operations to an existing dashboard. Grafana enforces the signed-in user permissions on the actual save. Preserve unrelated content.', { uid: string, dashboard: { type: 'object', additionalProperties: true }, operations, folderUid: string, message: string, overwrite: { type: 'boolean' } }),
   definition('create_dashboard_copy', 'Create a new modified copy of a readable dashboard after a copy request or acceptance of a pending copy offer. To remove panels, prefer removePanelIds; it handles nested row panels using the full source without model truncation. Make the modified copy in one save rather than a plain copy followed by edits. Never edit or overwrite the source. Destination creation permissions are enforced by Grafana.', { sourceUid: string, title: string, operations, removePanelIds: { type: 'array', minItems: 1, items: { type: 'integer' }, description: 'Exact panel IDs to remove recursively from the source. Mutually exclusive with operations. All other content is preserved.' }, folderUid: string }, ['sourceUid']),
+  definition('query_datasource', 'Execute a native Grafana backend datasource query as the signed-in user. Supports backend query models for MySQL/PostgreSQL/MSSQL (rawSql, format: table), Loki (expr, queryType), Prometheus (expr, instant/range), InfluxDB (query/rawQuery), Elasticsearch (query, metrics, bucketAggs), Tempo/Jaeger/Zipkin and TestData. Use the exact datasource type and a valid native query model; plugin/version capabilities vary. Discover schema or reuse dashboard targets rather than inventing fields. SQL must be requested read-only diagnostics; never generate data-changing statements. Do not pass credentials, URLs or headers. Inspect returned errors and frames; HTTP success alone is not query success.', { ...source, query: { type: 'object', additionalProperties: true, description: 'One native Grafana query target, without datasource, refId, credentials or connection overrides.' }, from: { type: 'string', description: 'Grafana time, e.g. now-1h or epoch milliseconds. Defaults to now-1h.' }, to: { type: 'string', description: 'Grafana time, default now.' } }, ['datasourceUid', 'query']),
+  definition('check_datasource_health', 'Run the configured datasource plugin health check as the signed-in user. This is different from executing a query; report unsupported checks and failures accurately.', source, ['datasourceUid']),
   definition('test_mysql_query', 'Test a MySQL datasource by executing SELECT 1 AS connection_test through Grafana as the signed-in user. Use this when asked to check MySQL connectivity or run a test query. The SQL is fixed and does not modify data.', source, ['datasourceUid']),
   definition('query_prometheus', 'Run a PromQL query through Grafana as the signed-in user.', { ...source, expr: string, queryType: { type: 'string', enum: ['instant', 'range'] }, startTime: string, endTime: string, stepSeconds: { type: 'number' } }, ['datasourceUid', 'expr']),
   definition('list_prometheus_label_values', 'Read Prometheus label values using the signed-in user permissions.', { ...source, labelName: string }, ['datasourceUid', 'labelName']),
@@ -97,6 +99,26 @@ export class SessionToolClient {
         // No trust is placed in model-supplied canEdit/canSave, user IDs or roles.
         // POST /api/dashboards/db is the server-side authorization boundary.
         return api.post('/api/dashboards/db', { dashboard, ...(folderUid !== undefined ? { folderUid } : {}), overwrite: args.overwrite === true, message: typeof args.message === 'string' ? args.message : 'AI Assistant dashboard update' });
+      }
+      case 'check_datasource_health': {
+        return api.get(`/api/datasources/uid/${identifier(args.datasourceUid, 'datasource UID')}/health`);
+      }
+      case 'query_datasource': {
+        const uid = identifier(args.datasourceUid, 'datasource UID');
+        if (!args.query || typeof args.query !== 'object' || Array.isArray(args.query)) throw new Error('A native datasource query object is required.');
+        const query = args.query as Record<string, unknown>;
+        for (const key of ['datasource', 'datasourceId', 'refId', 'url', 'headers', 'token', 'password', 'basicAuth', 'secureJsonData']) {
+          if (key in query) throw new Error(`Query field ${key} is not allowed; the configured datasource identity is resolved by Grafana.`);
+        }
+        const datasource = await api.get(`/api/datasources/uid/${uid}`);
+        const result = await api.post('/api/ds/query', {
+          from: typeof args.from === 'string' ? args.from : 'now-1h', to: typeof args.to === 'string' ? args.to : 'now',
+          queries: [{ ...query, refId: 'A', datasource: { uid, type: datasource.type } }],
+        });
+        const response = result?.results?.A;
+        if (!response) throw new Error('Grafana returned no result for query A.');
+        if (response.error || Number(response.status) >= 400) throw new Error(String(response.error || `Datasource query failed (${response.status}).`));
+        return { datasourceUid: uid, datasourceType: datasource.type, results: result.results };
       }
       case 'test_mysql_query': {
         const uid = identifier(args.datasourceUid, 'datasource UID');
